@@ -1,6 +1,6 @@
 ---
 name: orchestrate
-description: Multi-agent orchestration: manager plans, spawns researcher/worker/validator subagents, independent judge reviews. Use for substantial multi-step tasks via /orchestrate or $orchestrate. Not for trivial single-step requests.
+description: "Multi-agent orchestration: manager plans, spawns researcher/worker/validator subagents, independent judge reviews. Use for substantial multi-step tasks via /orchestrate or $orchestrate. Not for trivial single-step requests."
 ---
 
 # Orchestrate
@@ -22,16 +22,22 @@ delegate.
    build/serve commands.
 3. Spawn `codebase-researcher`, `implementation-worker`, and
    `test-validator` as subagents (each gets an automatically isolated git
-   worktree -- no flag to set); submit the completed package to
-   `result-judge`. Respect `workflow.maximumParallelWorkers` (default 4)
-   from orchestration.json, disjoint write scopes, up to 2 judge
-   correction cycles, delegation only when useful.
+   worktree -- no flag to set); for complex / high-risk /
+   security-sensitive or explicitly requested review submit the completed
+   package to `result-judge`. Respect `workflow.maximumParallelWorkers`
+   (default 4) from orchestration.json, disjoint write scopes, up to 2
+   judge correction cycles, per-role deadlines and bounded wait slices
+   from `workflow.agentTimeoutSeconds` / `waitSliceSeconds`,
+   close-on-timeout with at most `workflow.maximumAgentRetries` retries
+   (default 0), delegation only when useful.
 4. Permission questions the workflow raises (destructive Git, external
    mutations, default-off overrides) go to the user directly; delegates
    never self-approve.
 5. Finish with the manager's single consolidated report: what was done,
-   files changed, validation evidence, judge verdict and resolution,
-   correction cycles used, remaining risks, overall status.
+   files changed, validation evidence, judge verdict and resolution (or
+   the manager compliance-gate result when no judge was warranted),
+   correction cycles used, any timed-out delegates and how their scope
+   was covered, remaining risks, overall status.
 
 ## Notes
 

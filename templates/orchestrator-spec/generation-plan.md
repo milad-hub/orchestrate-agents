@@ -31,6 +31,9 @@ How to (re)generate runtime artifacts from this spec.
 ## Validation checklist
 
 - JSON parses (`python -m json.tool`).
+- Runtime and template JSON contain a non-negative `maximumAgentRetries`,
+  a positive `waitSliceSeconds`, and positive `agentTimeoutSeconds` values
+  for every role.
 - Every agent file has valid YAML frontmatter with a known agent name and
   correct model (opus/haiku/haiku/haiku/sonnet) and effort.
 - Only task-orchestrator's `tools` includes `Agent(...)`.

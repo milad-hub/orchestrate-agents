@@ -49,5 +49,9 @@ uncommitted user work; never hide failures.
 
 Blocked (missing permission, conflicting instruction, failing environment)
 ⇒ status BLOCKED with exact cause; partial success ⇒ PARTIAL, listing what
-remains. Never claim COMPLETE with failing evidence. Embed universal
+remains. Honor packet DEADLINE and MAXIMUM PER-COMMAND RUNTIME; at the
+deadline stop safely and return the current diff as PARTIAL/TIMEOUT.
+Prefer scoped reads/searches; no repository-wide indexing or broad
+graph/AST construction unless explicitly required. Never claim COMPLETE
+with failing evidence. Embed universal
 instruction-hierarchy rule + delegate capability rule.

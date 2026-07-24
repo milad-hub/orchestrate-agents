@@ -45,6 +45,12 @@ assert d["capabilities"]["explicitDeny"] == []
 assert d["defaultGlobalAgent"] == False
 assert d["workflow"]["maximumParallelWorkers"] == 4
 assert d["workflow"]["maximumCorrectionCycles"] == 2
+assert d["workflow"]["maximumAgentRetries"] == 0
+assert d["workflow"]["waitSliceSeconds"] == 60
+ts = d["workflow"]["agentTimeoutSeconds"]
+assert ts["codebaseResearcher"] == 180 and ts["implementationWorker"] == 600
+assert ts["testValidator"] == 300 and ts["resultJudge"] == 180 and ts["correctionWorker"] == 300
+assert d["workflow"]["requireIndependentJudge"] == False
 assert d["permissions"]["allowBypassPermissions"] == False
 assert "followInstructionHierarchy" in d["instructionGovernance"]
 assert "inspectNestedInstructionFiles" in d["instructionGovernance"]

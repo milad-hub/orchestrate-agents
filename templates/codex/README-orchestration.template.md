@@ -11,7 +11,7 @@ User task
     → codebase-researcher ({{REASONING_EFFORT_RESEARCHER}}, sandbox: read-only)      ─┐ up to
     → implementation-worker ({{REASONING_EFFORT_WORKER}}, sandbox: workspace-write)  ─┤ 4 parallel
     → test-validator ({{REASONING_EFFORT_VALIDATOR}}, sandbox: workspace-write)      ─┘ subagents,
-  → result-judge ({{REASONING_EFFORT_JUDGE}}, sandbox: read-only, independent)
+  → result-judge ({{REASONING_EFFORT_JUDGE}}, sandbox: read-only, independent — complex/high-risk or on request)
   → correction loop (≤2 cycles)
   → one consolidated final response
 ```
@@ -163,6 +163,16 @@ BLOCKER/HIGH finding → narrow correction packet → worker subagent →
 re-run affected tests/checks → manager re-review → re-judge. Max 2 judge
 cycles; still rejected ⇒ status INCOMPLETE with outstanding findings.
 Mandatory violations are never silently waived.
+
+Subagents run under per-role deadlines (`workflow.agentTimeoutSeconds`:
+researcher 180s, worker 600s, validator 300s, judge 180s, correction
+worker 300s) with bounded `wait_agent` slices (`waitSliceSeconds`,
+default 60). A subagent that exceeds its deadline is `close_agent`-ed
+immediately; with `maximumAgentRetries` (default 0) the manager does not
+re-run it, completing the scope locally or reporting it as a gap. The
+independent judge is required only for complex/high-risk/security-
+sensitive or explicitly requested work — manager review and validation
+stay mandatory in every class.
 
 ## 12. Security / prompt injection
 

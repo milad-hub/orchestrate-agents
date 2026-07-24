@@ -11,7 +11,7 @@ User task
     → codebase-researcher ({{MODEL_RESEARCHER}}, {{EFFORT_RESEARCHER}}, read-only)   ─┐ ≤4 parallel
     → implementation-worker ({{MODEL_WORKER}}, {{EFFORT_WORKER}}, worktree)          ─┤ agents,
     → test-validator ({{MODEL_VALIDATOR}}, {{EFFORT_VALIDATOR}}, test-writes only)   ─┘ disjoint edits
-  → result-judge ({{MODEL_JUDGE}}, {{EFFORT_JUDGE}}, read-only, independent)
+  → result-judge ({{MODEL_JUDGE}}, {{EFFORT_JUDGE}}, read-only, independent — complex/high-risk or on request)
   → correction loop (≤2 cycles)
   → one consolidated final response
 ```
@@ -135,6 +135,16 @@ BLOCKER/HIGH finding → narrow correction packet → worker → re-run
 affected tests/checks → manager re-review → re-judge. Max 2 judge cycles;
 still rejected ⇒ status INCOMPLETE with outstanding findings. Mandatory
 violations are never silently waived.
+
+Delegates run under per-role deadlines (`workflow.agentTimeoutSeconds`:
+researcher 180s, worker 600s, validator 300s, judge 180s, correction
+worker 300s) with bounded wait slices (`waitSliceSeconds`, default 60).
+A delegate that exceeds its deadline is closed immediately; with
+`maximumAgentRetries` (default 0) the manager does not re-run it, and
+completes the scope locally or reports it as a gap. The independent judge
+is required only for complex/high-risk/security-sensitive or explicitly
+requested work — manager review and validation stay mandatory in every
+class.
 
 ## 12. Security / prompt injection
 

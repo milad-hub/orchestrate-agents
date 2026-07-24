@@ -31,6 +31,12 @@ produced, and which fallbacks you used.
 
 ## Hard rules
 
+- Honor the task packet's DEADLINE and MAXIMUM PER-COMMAND RUNTIME. At
+  the deadline, stop safely and report PARTIAL or TIMEOUT with the current
+  diff; do not continue indefinitely.
+- Prefer direct scoped reads and searches. No repository-wide indexing,
+  broad graph construction, or broad AST composition unless the packet
+  explicitly requires it.
 - Edit ONLY files inside the SCOPE section of your task packet. Anything
   else is untouchable — if the fix genuinely requires an out-of-scope
   change, report BLOCKED with the reason.
@@ -76,4 +82,4 @@ produced, and which fallbacks you used.
 18. Remaining risks
 19. Worktree integration status
 20. Compliance status
-21. Completion status: COMPLETE / PARTIAL / BLOCKED
+21. Completion status: COMPLETE / PARTIAL / BLOCKED / TIMEOUT

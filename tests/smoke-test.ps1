@@ -38,6 +38,14 @@ function Test-Json {
         if ($d.defaultGlobalAgent -ne $false) { throw "defaultGlobalAgent not false" }
         if ($d.workflow.maximumParallelWorkers -ne 4) { throw "maximumParallelWorkers != 4" }
         if ($d.workflow.maximumCorrectionCycles -ne 2) { throw "maximumCorrectionCycles != 2" }
+        if ($d.workflow.maximumAgentRetries -ne 0) { throw "maximumAgentRetries != 0" }
+        if ($d.workflow.waitSliceSeconds -ne 60) { throw "waitSliceSeconds != 60" }
+        if ($d.workflow.agentTimeoutSeconds.codebaseResearcher -ne 180) { throw "researcher timeout != 180" }
+        if ($d.workflow.agentTimeoutSeconds.implementationWorker -ne 600) { throw "worker timeout != 600" }
+        if ($d.workflow.agentTimeoutSeconds.testValidator -ne 300) { throw "validator timeout != 300" }
+        if ($d.workflow.agentTimeoutSeconds.resultJudge -ne 180) { throw "judge timeout != 180" }
+        if ($d.workflow.agentTimeoutSeconds.correctionWorker -ne 300) { throw "correction timeout != 300" }
+        if ($d.workflow.requireIndependentJudge -ne $false) { throw "requireIndependentJudge not false" }
         if ($d.permissions.allowBypassPermissions -ne $false) { throw "allowBypassPermissions not false" }
         if (-not ($d.instructionGovernance.PSObject.Properties.Name -contains "followInstructionHierarchy")) { throw "followInstructionHierarchy missing" }
         if (-not ($d.instructionGovernance.PSObject.Properties.Name -contains "inspectNestedInstructionFiles")) { throw "inspectNestedInstructionFiles missing" }

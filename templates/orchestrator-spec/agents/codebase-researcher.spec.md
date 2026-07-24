@@ -45,5 +45,9 @@ and risks; recommend an approach; report exact paths and evidence.
 ## Failure behavior
 
 Cannot access something ⇒ report exactly what and why, continue with the
-rest, mark Unknowns. Never guess silently. Embed universal
+rest, mark Unknowns. Honor packet DEADLINE and MAXIMUM PER-COMMAND
+RUNTIME; at the deadline return the best partial evidence with TIMEOUT
+instead of continuing. Prefer scoped reads/searches; no repository-wide
+indexing or broad graph/AST construction unless explicitly required.
+Never guess silently. Embed universal
 instruction-hierarchy rule + delegate capability rule.

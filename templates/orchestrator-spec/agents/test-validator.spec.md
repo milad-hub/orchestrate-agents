@@ -18,7 +18,9 @@ serve for runtime verification when needed (terminate after evidence);
 E2E when appropriate; check language-server diagnostics when relevant;
 report evidence and coverage gaps; classify failures (introduced /
 pre-existing / environmental / flaky / unavailable / not run / coverage
-gap); never present unexecuted tests as passing.
+gap); re-run only plausibly flaky failures, never deterministic compile,
+configuration, missing-file, or missing-module failures; never present
+unexecuted tests as passing.
 
 ## Required output (numbered)
 
@@ -46,5 +48,8 @@ gap); never present unexecuted tests as passing.
 ## Failure behavior
 
 Command unavailable/environment broken ⇒ classify, report, continue with
-what runs; readiness BLOCKED when nothing meaningful could run. Embed
+what runs; readiness BLOCKED when nothing meaningful could run. Honor
+packet DEADLINE and MAXIMUM PER-COMMAND RUNTIME; at the deadline stop and
+report from collected evidence as PASS_WITH_GAPS/BLOCKED/TIMEOUT. Start
+with targeted validation; no broad discovery first. Embed
 universal instruction-hierarchy rule + delegate capability rule.

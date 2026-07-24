@@ -23,15 +23,22 @@ here.
    build/serve commands.
 3. Delegate via the Agent tool to `codebase-researcher`,
    `implementation-worker` (with `isolation: "worktree"`), and
-   `test-validator`; submit the completed package to `result-judge`.
-   Respect: ≤4 parallel lower-level agents, disjoint write scopes, ≤2
-   judge correction cycles, delegation only when useful.
+   `test-validator`; for complex / high-risk / security-sensitive or
+   explicitly requested review submit the completed package to
+   `result-judge`. Respect: ≤4 parallel lower-level agents, disjoint
+   write scopes, ≤2 judge correction cycles, per-role deadlines and
+   bounded wait slices from `workflow.agentTimeoutSeconds` /
+   `waitSliceSeconds`, close-on-timeout with at most
+   `workflow.maximumAgentRetries` retries (default 0), delegation only
+   when useful.
 4. Permission questions the workflow raises (destructive Git, external
    mutations, default-off overrides) go to the user directly; delegates
    never self-approve.
 5. Finish with the manager's single consolidated report: what was done,
-   files changed, validation evidence, judge verdict and resolution,
-   correction cycles used, remaining risks, overall status.
+   files changed, validation evidence, judge verdict and resolution (or
+   the manager compliance-gate result when no judge was warranted),
+   correction cycles used, any timed-out delegates and how their scope
+   was covered, remaining risks, overall status.
 
 ## Notes
 

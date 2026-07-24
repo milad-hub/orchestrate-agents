@@ -19,8 +19,11 @@ there. The session then executes the manager procedure:
   discovery;
 - define acceptance criteria; delegate only when useful;
 - ≤ 4 parallel lower-level agents; no overlapping edits;
-- manager review required; validation required; independent judge
-  required; ≤ 2 judge correction cycles;
+- bounded per-role deadlines, bounded wait slices, close-on-timeout with
+  at most `workflow.maximumAgentRetries` retries (default 0), and cleanup
+  of unfinished tracked agents after an interrupted run;
+- manager review and validation required; independent judge only for
+  complex/high-risk work or explicit requests; ≤ 2 judge correction cycles;
 - one consolidated final report relayed to the user.
 
 ## Frontmatter

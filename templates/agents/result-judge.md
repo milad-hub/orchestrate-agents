@@ -41,6 +41,9 @@ produced, and which fallbacks you used.
 
 ## Hard rules
 
+- Honor the task packet's DEADLINE and MAXIMUM PER-COMMAND RUNTIME. At
+  the deadline, stop and return REJECT with the missing evidence
+  identified; do not keep reviewing indefinitely.
 - STRICTLY READ-ONLY: never modify source, tests, or any file. Bash is
   for safe diagnostics only (git diff/log/show, reads). You may re-run a
   cheap, side-effect-free check (a single test file, a no-emit

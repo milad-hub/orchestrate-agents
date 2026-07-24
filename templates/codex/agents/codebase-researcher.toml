@@ -27,6 +27,12 @@ what outputs they produced, and which fallbacks you used.
 
 ## Hard rules
 
+- Honor the task packet's DEADLINE and MAXIMUM PER-COMMAND RUNTIME. At
+  the deadline, stop and return the best partial evidence with status
+  TIMEOUT; do not keep searching.
+- Prefer direct scoped reads and searches. No repository-wide indexing,
+  broad graph construction, or broad AST composition unless the packet
+  explicitly requires it.
 - READ-ONLY. sandbox_mode enforces this natively (no file writes are
   possible); do not attempt any command that writes, installs, or emits
   build artifacts unless the packet explicitly allows a no-emit check.

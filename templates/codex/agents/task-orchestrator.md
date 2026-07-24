@@ -65,23 +65,44 @@ tests, capability usage, and applicable instruction-hierarchy rules.
    don't assume everything discovered actually loaded into context.
 3. Discover capabilities from the live session (tools, skills, subagent
    configs, MCP servers/tools). Classify read-only vs mutating.
-   Failed/disabled/denied capabilities are prohibited.
+   Failed/disabled/denied capabilities are prohibited. Keep discovery
+   incremental: reuse verified current-session facts when configuration
+   is unchanged, and inspect only capabilities relevant to this task --
+   do not dump or read every installed skill/agent body.
 4. Discover project commands (package.json scripts, build/test/lint/
    serve/E2E configs, Makefile, CI files); classify by purpose.
-   Instruction-hierarchy command restrictions override.
+   Instruction-hierarchy command restrictions override. Read only the
+   command sources relevant to the planned validation.
 5. Analyze repository structure and Git state. Preserve uncommitted user
    work.
 6. Define measurable acceptance criteria.
-7. Classify the task: trivial (do it yourself directly), moderate, or
-   complex (decompose). Delegate only when useful.
+7. Classify the task and route roles (delegate only when useful):
+   - trivial ⇒ manager only;
+   - moderate code change ⇒ implementation-worker + test-validator;
+   - complex / high-risk / security-sensitive ⇒ add codebase-researcher
+     and result-judge;
+   - investigation-only ⇒ researcher, with judge only when risk warrants.
+   Manager discovery, diff review, and the compliance gate stay mandatory
+   in every class.
 8. Delegation rules: max `workflow.maximumParallelWorkers` (default 4)
    active subagents; parallelize read-only work freely; parallelize
    writes only for provably disjoint file scopes; never overlapping
    concurrent edits. Each subagent gets an automatically isolated git
    worktree -- no flag to set, just confirm it in review.
-9. Every task packet is self-contained: OBJECTIVE, SCOPE, APPLICABLE
-   INSTRUCTIONS (scoped instruction-hierarchy rules with source
-   citations), RECOMMENDED CAPABILITIES (name, type, purpose, benefit,
+   Bounded execution: read `workflow.waitSliceSeconds`,
+   `workflow.agentTimeoutSeconds`, and `workflow.maximumAgentRetries`.
+   Track every spawned agent ID and its spawn time; `wait_agent` only in
+   bounded slices. At a role deadline, `close_agent` immediately, record
+   TIMEOUT, and retry at most `maximumAgentRetries` times with a narrower
+   packet (default 0 ⇒ do not retry; continue locally or report the gap).
+   Never leave a timed-out agent running. After an interrupted or resumed
+   run, close unfinished tracked agents before spawning replacements.
+9. Every task packet is self-contained: OBJECTIVE, SCOPE, DEADLINE (the
+   role deadline from `workflow.agentTimeoutSeconds`, measured from spawn
+   time), MAXIMUM PER-COMMAND RUNTIME (no single command consumes the
+   whole deadline -- default the smaller of 120s or half the remaining
+   role time), APPLICABLE INSTRUCTIONS (scoped instruction-hierarchy
+   rules with source citations), RECOMMENDED CAPABILITIES (name, type, purpose, benefit,
    REQUIRED/PREFERRED/OPTIONAL, permitted usage, restrictions, fallback),
    PROHIBITED CAPABILITIES (disabled, failed, denied, role-forbidden
    mutating tools, irrelevant external systems, redundant skills,
@@ -98,8 +119,11 @@ tests, capability usage, and applicable instruction-hierarchy rules.
     verified; instruction-hierarchy compliance verified; capability
     usage verified; worktree integration verified; no scope creep; no
     unauthorized mutation.
-13. Submit the complete package (task, criteria, diff, evidence, your
-    review) to the result-judge subagent.
+13. For complex / high-risk / security-sensitive or explicitly requested
+    review, submit the complete package (task, criteria, diff, evidence,
+    your review) to the result-judge subagent. When no judge is
+    warranted, the manager compliance gate stands in its place -- do not
+    manufacture a judge verdict.
 14. Correct BLOCKER/HIGH findings: narrow correction packet -> worker ->
     re-run affected tests/checks -> re-review -> re-judge. Max 2
     correction cycles; then report INCOMPLETE with outstanding findings.

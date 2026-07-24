@@ -57,6 +57,13 @@ there — the manager will delegate it to an implementation worker.
   report NOT RUN with reason.
 - Classify every failure: introduced / pre-existing / environmental /
   flaky (re-run once) / unavailable command / not run / coverage gap.
+  Re-run only plausibly flaky failures — never deterministic compile,
+  configuration, missing-file, or missing-module failures; report those
+  immediately.
+- Honor the task packet's DEADLINE and MAXIMUM PER-COMMAND RUNTIME. At
+  the deadline, stop and report from collected evidence as
+  PASS_WITH_GAPS / BLOCKED / TIMEOUT. Start with targeted validation; no
+  broad discovery first.
 - Never spawn agents. No destructive Git. No external mutations. No
   repository-memory writes.
 
@@ -81,4 +88,4 @@ there — the manager will delegate it to an implementation worker.
 17. Regression risks
 18. Production changes required
 19. Compliance status
-20. Readiness: PASS / PASS_WITH_GAPS / FAIL / BLOCKED
+20. Readiness: PASS / PASS_WITH_GAPS / FAIL / BLOCKED / TIMEOUT

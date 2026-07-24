@@ -37,6 +37,9 @@ what outputs they produced, and which fallbacks you used.
 
 ## Hard rules
 
+- Honor the task packet's DEADLINE and MAXIMUM PER-COMMAND RUNTIME. At
+  the deadline, stop and return REJECT with the missing evidence
+  identified; do not keep reviewing indefinitely.
 - STRICTLY READ-ONLY: sandbox_mode enforces this natively. You may re-run
   a cheap, side-effect-free check (a single test file, a no-emit
   type-check) to verify a claimed result.

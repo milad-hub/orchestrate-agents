@@ -68,21 +68,43 @@ diffs, commands, tests, capability usage, and applicable CLAUDE.md rules.
    conflicts).
 3. Discover capabilities from the live session (tools, skills, agents,
    plugins, MCP servers/tools, hooks, language servers). Classify
-   read-only vs mutating. Failed/disabled/denied ⇒ prohibited.
+   read-only vs mutating. Failed/disabled/denied ⇒ prohibited. Keep
+   discovery incremental: reuse verified current-session facts when
+   configuration is unchanged, and inspect only capabilities relevant to
+   this task — do not dump or read every installed skill/agent body.
 4. Discover project commands (package.json scripts, angular/nx/turbo
    configs, test/build/lint/serve/E2E configs, Makefile, CI files);
-   classify by purpose. CLAUDE.md command restrictions override.
+   classify by purpose. CLAUDE.md command restrictions override. Read
+   only the command sources relevant to the planned validation.
 5. Analyze repository structure and Git state. Preserve uncommitted user
    work.
 6. Define measurable acceptance criteria.
-7. Classify the task: trivial (do it yourself directly), moderate, or
-   complex (decompose). Delegate only when useful.
+7. Classify the task and route roles (delegate only when useful):
+   - trivial ⇒ manager only;
+   - moderate code change ⇒ implementation-worker + test-validator;
+   - complex / high-risk / security-sensitive ⇒ add codebase-researcher
+     and result-judge;
+   - investigation-only ⇒ researcher, with judge only when risk warrants.
+   Manager discovery, diff review, and the compliance gate stay mandatory
+   in every class.
 8. Delegation rules: max 4 active lower-level agents; parallelize
    read-only work freely; parallelize writes only for provably disjoint
    file scopes; never overlapping concurrent edits. Spawn
    implementation-worker with `isolation: "worktree"`.
-9. Every task packet is self-contained: OBJECTIVE, SCOPE, APPLICABLE
-   INSTRUCTIONS (scoped CLAUDE.md rules with source citations),
+   Bounded execution: read `workflow.waitSliceSeconds`,
+   `workflow.agentTimeoutSeconds`, and `workflow.maximumAgentRetries`.
+   Track every spawned agent ID and its spawn time. Wait only in bounded
+   slices. At a role deadline, close the agent immediately, record
+   TIMEOUT, and retry at most `maximumAgentRetries` times with a narrower
+   packet (default 0 ⇒ do not retry; continue locally or report the gap).
+   Never leave a timed-out agent running. After an interrupted or resumed
+   run, close unfinished tracked agents before spawning replacements.
+9. Every task packet is self-contained: OBJECTIVE, SCOPE, DEADLINE (the
+   role deadline from `workflow.agentTimeoutSeconds`, measured from spawn
+   time), MAXIMUM PER-COMMAND RUNTIME (no single command consumes the
+   whole deadline — default the smaller of 120s or half the remaining
+   role time), APPLICABLE INSTRUCTIONS (scoped CLAUDE.md rules with
+   source citations),
    RECOMMENDED CAPABILITIES (name, type, purpose, benefit,
    REQUIRED/PREFERRED/OPTIONAL, permitted usage, restrictions, fallback),
    PROHIBITED CAPABILITIES (disabled, failed, denied, role-forbidden
@@ -99,16 +121,21 @@ diffs, commands, tests, capability usage, and applicable CLAUDE.md rules.
     verified; CLAUDE.md compliance verified; capability usage verified;
     worktree integration verified; no scope creep; no unauthorized
     mutation.
-13. Submit the complete package (task, criteria, diff, evidence, your
-    review) to result-judge.
+13. For complex / high-risk / security-sensitive or explicitly requested
+    review, submit the complete package (task, criteria, diff, evidence,
+    your review) to result-judge. When no judge is warranted, the manager
+    compliance gate stands in its place — do not manufacture a judge
+    verdict.
 14. Correct BLOCKER/HIGH findings: narrow correction packet → worker →
     re-run affected tests/checks → re-review → re-judge. Max 2 correction
     cycles; then report INCOMPLETE with outstanding findings. Never
     silently waive a mandatory violation.
 15. Return ONE consolidated final response: what was done, files changed,
-    validation evidence, judge verdict and resolution, cycles used,
-    instruction conflicts, external mutations (approved/pending),
-    remaining risks, overall status.
+    validation evidence, judge verdict and resolution (or the manager
+    compliance-gate result when no judge was warranted), cycles used,
+    every timed-out delegate (whether it was closed and whether a local
+    fallback completed its scope), instruction conflicts, external
+    mutations (approved/pending), remaining risks, overall status.
 
 ## Hard limits
 

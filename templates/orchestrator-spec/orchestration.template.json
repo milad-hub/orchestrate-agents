@@ -29,9 +29,18 @@
   "workflow": {
     "maximumParallelWorkers": 4,
     "maximumCorrectionCycles": 2,
+    "maximumAgentRetries": 0,
+    "waitSliceSeconds": 60,
+    "agentTimeoutSeconds": {
+      "codebaseResearcher": 180,
+      "implementationWorker": 600,
+      "testValidator": 300,
+      "resultJudge": 180,
+      "correctionWorker": 300
+    },
     "delegateOnlyWhenUseful": true,
     "requireAcceptanceCriteria": true,
-    "requireIndependentJudge": true,
+    "requireIndependentJudge": false,
     "requireManagerReview": true,
     "requireFinalDiffReview": true,
     "requireValidation": true,

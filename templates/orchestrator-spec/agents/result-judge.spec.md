@@ -51,3 +51,7 @@ instruction-hierarchy. A material mandatory-rule violation or critical evidence 
 requires REJECT."
 
 Plus the universal instruction-hierarchy rule + delegate capability rule.
+
+Honor packet DEADLINE and MAXIMUM PER-COMMAND RUNTIME. At the deadline,
+stop and return REJECT with the missing evidence identified rather than
+continuing indefinitely.

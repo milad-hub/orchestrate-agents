@@ -15,31 +15,46 @@
 
 1. Read `{{AGENT_HOME_DIR}}/orchestration.json`.
 2. Read all applicable instruction-hierarchy files → instruction manifest.
-3. Discover current capabilities (live session).
-4. Discover repository commands.
+3. Discover current task-relevant capabilities; reuse verified
+   current-session discovery when configuration is unchanged.
+4. Discover only repository commands relevant to planned validation.
 5. Analyze repository structure and Git state.
 6. Define measurable acceptance criteria.
-7. Classify: trivial / moderate / complex.
-8. Trivial ⇒ do it directly; delegation only when useful.
+7. Classify: trivial / moderate / complex/high-risk.
+8. Trivial ⇒ manager only. Moderate code change ⇒ worker + validator.
+   Complex/high-risk/security-sensitive ⇒ add researcher + judge.
+   Investigation-only ⇒ researcher, with judge only when risk warrants.
+   Manager discovery, review, and compliance gate remain mandatory.
 9. Decompose complex work into disjoint subtasks.
 10. ≤ 4 active lower-level agents at any time.
-11. Parallelize read-only independent work freely.
-12. Parallelize writes only for disjoint file scopes; never overlapping
+11. Read `workflow.waitSliceSeconds`, `workflow.agentTimeoutSeconds`, and
+    `workflow.maximumAgentRetries`. Track every spawned agent ID and spawn
+    time. Wait only in bounded slices. At a role deadline, close the agent
+    immediately, record TIMEOUT, and retry at most the configured count
+    with a narrower packet. If retry is not useful, continue locally or
+    report the gap. Never leave a timed-out agent running. After an
+    interrupted/resumed run, close unfinished tracked agents before
+    spawning replacements.
+12. Parallelize read-only independent work freely.
+13. Parallelize writes only for disjoint file scopes; never overlapping
     concurrent edits.
-13. Select agents/skills/MCP/commands deliberately (capability-routing).
-14. Build self-contained task packets (task-packet-instructions.md) with
-    scoped instruction-hierarchy rules, RECOMMENDED and PROHIBITED capabilities, and
-    evidence requirements. Spawn workers with `isolation: "worktree"`.
-15. Review all delegate output directly: inspect critical source files,
+14. Select agents/skills/MCP/commands deliberately (capability-routing).
+15. Build concise, self-contained task packets
+    (task-packet-instructions.md) with DEADLINE, MAXIMUM PER-COMMAND
+    RUNTIME, scoped instruction-hierarchy rules, RECOMMENDED and
+    PROHIBITED capabilities, and evidence requirements. Spawn workers
+    with `isolation: "worktree"`.
+16. Review all delegate output directly: inspect critical source files,
     the final diff, command results, instruction-hierarchy compliance, capability
     usage, worktree integration.
-16. Run validation (test-validator).
-17. Complete the manager compliance gate (checklist: criteria met, diff
+17. Run validation (test-validator).
+18. Complete the manager compliance gate (checklist: criteria met, diff
     reviewed, evidence verified, instructions enforced, scope respected).
-18. Send the complete result package to result-judge.
-19. Correct BLOCKER and HIGH findings via the correction loop.
-20. ≤ 2 judge correction cycles; then report INCOMPLETE if still rejected.
-21. Return ONE consolidated final response (policies/reporting.md).
+19. Send the complete result package to result-judge only for
+    complex/high-risk/security-sensitive or explicitly requested review.
+20. Correct BLOCKER and HIGH findings via the correction loop.
+21. ≤ 2 judge correction cycles; then report INCOMPLETE if still rejected.
+22. Return ONE consolidated final response (policies/reporting.md).
 
 ## Mandatory rules (embedded verbatim in the generated agent)
 
@@ -71,7 +86,8 @@ Plus the universal instruction-hierarchy rule.
 ## Failure behavior
 
 Blocked on approvals/permissions ⇒ ask the user (that is the manager's
-job). Delegate failure ⇒ diagnose from its report + repository state;
-retry with a corrected packet or reassign; never paper over. Max-turn
-guidance: budget turns to leave room for review + judge + corrections —
-delegate early, review incrementally.
+job). Delegate failure or timeout ⇒ close it first, diagnose from its
+report + repository state, retry once with a narrower corrected packet
+or continue locally; never paper over and never wait indefinitely.
+Max-turn guidance: budget turns to leave room for review + judge +
+corrections — delegate early, review incrementally.
