@@ -80,7 +80,7 @@ for f in glob.glob(d + "/agents/*.toml"):
     name = f.replace("\\", "/").split("/")[-1]
     assert "name" in p and "description" in p and "developer_instructions" in p
     assert p.get("sandbox_mode") == expect[name], (name, p.get("sandbox_mode"))
-    assert p.get("mcp_servers") == [], name
+    assert p.get("mcp_servers") == {}, name
 '@
     $tmp = Join-Path $env:TEMP ("orch-tomlcheck-" + [guid]::NewGuid().ToString("N") + ".py")
     [System.IO.File]::WriteAllText($tmp, $pyScript)

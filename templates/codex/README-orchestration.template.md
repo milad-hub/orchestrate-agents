@@ -43,7 +43,7 @@ at the top level, invoked via the `orchestrate` skill.
 
 As configured at install time — see your `orchestration.json` for the
 authoritative current values (`/orchestrate-update` may adjust
-`mcp_servers` arrays and the deny list, never effort/limits without
+`mcp_servers` maps and the deny list, never effort/limits without
 asking):
 
 | Role | Reasoning effort | Model | Write src | Write tests | Sandbox | Spawn | Worktree | MCP |
@@ -183,7 +183,7 @@ Dependency additions require manager sanction.
 
 ## 13. Excluded capabilities
 
-None by default. Every delegate `.toml` ships with `mcp_servers = []` and
+None by default. Every delegate `.toml` ships with `mcp_servers = {}` (an empty TOML map) and
 `orchestration.json`'s `capabilities.explicitDeny` is empty — this bundle
 makes no assumption about what's installed or connected on this machine.
 Run `/orchestrate-update` (required, see §16) to populate both from
@@ -206,7 +206,7 @@ what's actually on this installation.
 Codex installations vary — connected MCP servers, installed skills,
 subagent-field support, sandbox behavior. This bundle ships without
 assumptions about any of that; `/orchestrate-update` inspects *this*
-installation and reconciles the delegate `mcp_servers` arrays and
+installation and reconciles the delegate `mcp_servers` maps and
 `capabilities.explicitDeny` accordingly. Run it after install and
 periodically thereafter (new Codex CLI version, MCP servers
 added/removed).
@@ -215,7 +215,7 @@ added/removed).
 
 **Run `/orchestrate-update` now, right after installing** — it's what
 populates the deny list and MCP server routing for this machine; the
-bundle works before that too, just with empty `mcp_servers` arrays.
+bundle works before that too, just with empty `mcp_servers` maps.
 
 To customize further: edit specs in `{{CODEX_DIR}}/orchestrator-spec/`,
 then ask your session to regenerate the runtime files per
@@ -231,7 +231,7 @@ then ask your session to regenerate the runtime files per
 - Worker can't edit → check `sandbox_mode` on `implementation-worker.toml`
   is `workspace-write`, not `read-only`.
 - MCP tools missing in a subagent → confirm the server is declared in
-  its `.toml`'s `mcp_servers` array AND in `~/.codex/config.toml`
+  its `.toml`'s `mcp_servers` map AND in `~/.codex/config.toml`
   `[mcp_servers.*]`; run `/orchestrate-update`.
 - Judge approves nothing → check evidence quality first; the judge
   REJECTs on missing evidence by design.

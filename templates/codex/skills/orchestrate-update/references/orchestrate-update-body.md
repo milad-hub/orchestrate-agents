@@ -40,7 +40,7 @@ Compare live findings to what's currently written in:
   (`capabilities.explicitDeny`)
 - `README-orchestration.md`'s excluded-capabilities and
   unsupported-features sections
-- Each delegate's `mcp_servers` array in
+- Each delegate's `mcp_servers` map in
   `{{CODEX_DIR}}/agents/*.toml`
 
 Build a short change list: additions, removals, now-supported features to

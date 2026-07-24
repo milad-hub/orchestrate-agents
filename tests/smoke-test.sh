@@ -85,7 +85,7 @@ for f in glob.glob(d + "/agents/*.toml"):
     name = f.split("/")[-1].split("\\")[-1]
     assert "name" in parsed and "description" in parsed and "developer_instructions" in parsed
     assert parsed.get("sandbox_mode") == expect_sandbox[name], (name, parsed.get("sandbox_mode"))
-    assert parsed.get("mcp_servers") == [], name
+    assert parsed.get("mcp_servers") == {}, name
 PYEOF
   if [ $? -eq 0 ]; then
     pass "$label: all .toml files parse + sandbox_mode correct"

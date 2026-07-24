@@ -69,4 +69,4 @@ what outputs they produced, and which fallbacks you used.
 {{MODEL_COMMENT_RESEARCHER}}model = "{{MODEL_OVERRIDE_RESEARCHER}}"
 model_reasoning_effort = "{{REASONING_EFFORT_RESEARCHER}}"
 sandbox_mode = "read-only"
-mcp_servers = []
+mcp_servers = {}

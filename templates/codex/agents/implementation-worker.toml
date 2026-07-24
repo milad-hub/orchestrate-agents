@@ -86,4 +86,4 @@ what outputs they produced, and which fallbacks you used.
 {{MODEL_COMMENT_WORKER}}model = "{{MODEL_OVERRIDE_WORKER}}"
 model_reasoning_effort = "{{REASONING_EFFORT_WORKER}}"
 sandbox_mode = "workspace-write"
-mcp_servers = []
+mcp_servers = {}

@@ -82,9 +82,9 @@ the installed `README-orchestration.md` for the full rationale.
 This bundle ships with **no assumptions** about what's installed on your
 machine — no plugins, no MCP servers, no failed/disabled capabilities are
 pre-baked in, and every Codex subagent ships with an empty `mcp_servers`
-list. `/orchestrate-update` inspects *your* live installation once and
+map (table). `/orchestrate-update` inspects *your* live installation once and
 reconciles the delegate agents' tool allowlists (Claude) or `mcp_servers`
-arrays (Codex) and the capability deny-list accordingly. The system works
+tables (Codex) and the capability deny-list accordingly. The system works
 before you run it too, just conservatively.
 
 ## Use it
