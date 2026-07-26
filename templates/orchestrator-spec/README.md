@@ -40,22 +40,27 @@ describe the runtime files as generated from these specs alone.
 
 ## Regeneration
 
-Ask Claude Code: "Regenerate the orchestration runtime files from
-{{AGENT_HOME_DIR}}/orchestrator-spec/ following generation-plan.md." Validation steps
-are in `generation-plan.md`.
+Ask your assistant: "Regenerate the orchestration runtime files from
+{{AGENT_HOME_DIR}}/orchestrator-spec/ following generation-plan.md."
+Validation steps are in `generation-plan.md`.
 
 ## Keeping it current
 
-Run `/orchestrate-update` to re-sync this spec and the runtime files
-against the live Claude Code installation (version, plugins, MCP servers,
-agent frontmatter support). It edits narrowly — only what's actually
-drifted — and never touches workflow limits, permission policy, or model
-assignments without asking.
+Run `/orchestrate-sync` to re-sync this spec and the runtime files
+against the live CLI installation (version, plugins, MCP servers, agent
+config-field support). This directory ships to both Claude Code and Codex
+CLI, so nothing here is specific to either. It edits narrowly — only what's
+actually drifted — and never touches workflow limits or permission policy
+without asking.
+
+`orchestrator-spec/verify-install.py` is the executable definition of this
+install's invariants; `install-state.json` records the platform, bundle
+version and last-checked CLI version that `/orchestrate-sync` reads.
 
 ## Environment notes
 
 This bundle ships with no assumptions about your machine — no plugins, MCP
-servers, or failed capabilities are baked in. `/orchestrate-update` writes
+servers, or failed capabilities are baked in. `/orchestrate-sync` writes
 what it finds on THIS installation into this section (denied native tools,
 failed/disabled capabilities to exclude, verified frontmatter support).
 Orchestration never repairs or enables third-party capabilities.

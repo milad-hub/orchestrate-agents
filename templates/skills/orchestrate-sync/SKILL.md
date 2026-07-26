@@ -1,13 +1,17 @@
 ---
-name: orchestrate-update
-description: Re-sync the orchestration system ({{CLAUDE_DIR}}/orchestrator-spec/, orchestration.json, agents/, skills/) against the current Claude Code install -- version, plugins, MCP servers, frontmatter support, models. Use for "update orchestrate" or /orchestrate-update. Not for running tasks (that's /orchestrate).
+name: orchestrate-sync
+description: Re-sync the orchestration system ({{CLAUDE_DIR}}/orchestrator-spec/, orchestration.json, agents/, skills/) against the current Claude Code install -- version, plugins, MCP servers, frontmatter support, models. Use for "sync orchestrate", "update orchestrate", or /orchestrate-sync. Not for running tasks (that's /orchestrate).
 ---
 
-# Orchestrate Update
+# Orchestrate Sync
 
 Maintenance skill for the orchestration system in
 `{{CLAUDE_DIR}}/orchestrator-spec/`. Read-only discovery, then targeted edits
 only where drift is found -- never a blind full regenerate.
+
+`PY` below means the first of `python3`, `python`, `py -3` that runs. On
+Windows `python3` is frequently absent; do not conclude Python is missing
+until all three have failed.
 
 ## Procedure
 
@@ -15,15 +19,22 @@ only where drift is found -- never a blind full regenerate.
 
 Most runs find nothing. Establish that cheaply before spending anything.
 
-1. Compare `claude --version` against the version/date line recorded in
-   `orchestrator-spec/README.md`.
-2. If they match, and this session's own skill listing, agent-type listing
-   and `mcp__*` tool listing show nothing that the delegates' `tools:`
-   allowlists and `capabilities.explicitDeny` do not already account for,
-   go straight to step 4, report "no drift", and stop. Those listings are
+1. Read `orchestrator-spec/install-state.json` -- `platform`,
+   `bundleVersion`, `cliVersion`, `lastCheckedAt`. Compare `cliVersion`
+   against `claude --version`. A `null` means this is the first run since
+   install, so take the full path once.
+2. If `orchestrator-spec/prompt-hashes.json` is absent, create it now, before
+   any edit in this run: `PY {{CLAUDE_DIR}}/orchestrator-spec/verify-install.py
+   --bless {{CLAUDE_DIR}}`. It records a hash of each role's prompt body so
+   later runs can prove the bodies were not reworded. Blessing first thing
+   matters -- blessing after an edit would bake that edit into the baseline.
+3. If the version matches and this session's own skill, agent-type and
+   `mcp__*` tool listings show nothing that the delegates' `tools:`
+   allowlists and `capabilities.explicitDeny` do not already account for, go
+   straight to step 4, report "no drift", and stop. Those listings are
    already in context; reading them costs nothing.
 
-Steps 1-3 are for the case where something actually moved.
+Steps 1-3 below are for the case where something actually moved.
 
 ### 1. Re-inspect the installation (live, read-only)
 
@@ -38,11 +49,11 @@ Steps 1-3 are for the case where something actually moved.
   routinely megabytes, so never read it whole.
 - Frontmatter field support -- only when the version changed in step 0. On an
   unchanged version this re-derives a fact that cannot have moved. When it
-  did change: sample 2-3 shipped agent frontmatter blocks under
-  `{{CLAUDE_DIR}}/agents/` and
-  `{{CLAUDE_DIR}}/plugins/marketplaces/**/agents/*.md`, and note any field
-  that appears which is not in generation-plan.md's supported list, or a
-  previously-assumed field that has disappeared.
+  did change, prefer the documented frontmatter schema for this release;
+  sample 2-3 shipped agent files under `{{CLAUDE_DIR}}/agents/` and
+  `{{CLAUDE_DIR}}/plugins/marketplaces/**/agents/*.md` only to corroborate it.
+  Another tool's agent file is evidence of what that tool wrote, not of what
+  the platform supports.
 - Model tiers actually available to this user (from system context /
   CLAUDE.md): which of `opus`/`sonnet`/`haiku` exist, and whether a
   materially better option has appeared.
@@ -50,12 +61,12 @@ Steps 1-3 are for the case where something actually moved.
 ### 2. Diff against the spec's recorded state
 
 Compare live findings to what is currently written in:
-- `orchestrator-spec/README.md` (environment notes, date/version)
+- `orchestrator-spec/install-state.json` (platform, bundle version, last
+  seen CLI version and check date)
 - `orchestrator-spec/generation-plan.md` (version-support notes)
 - `orchestrator-spec/discovery/plugin-discovery.md` and `mcp-discovery.md`
   (known-disabled / known-failed lists)
-- `orchestration.json` + `orchestration.template.json`
-  (`capabilities.explicitDeny`)
+- `orchestration.json` (`capabilities.explicitDeny`)
 - `README-orchestration.md`'s "Excluded capabilities" and "Unsupported / not
   used features" sections -- by name, not by section number; the numbering
   shifts.
@@ -69,29 +80,35 @@ content that hasn't drifted.
 
 ### 3. Apply targeted edits
 
-- Update `capabilities.explicitDeny` in BOTH `orchestration.json` and
-  `orchestrator-spec/orchestration.template.json` to the current
+- Update `capabilities.explicitDeny` in `orchestration.json` to the current
   failed/disabled set (add newly-failed, remove newly-fixed).
+  `orchestrator-spec/orchestration.template.json` is the installer's build
+  input, not live config -- leave it alone.
 - Update the excluded-capabilities and version/date lines in
-  `README-orchestration.md` and `orchestrator-spec/README.md`.
+  `README-orchestration.md`, and write what you saw back into
+  `install-state.json` (`cliVersion`, `lastCheckedAt`).
 - If a previously-unsupported frontmatter field is now confirmed supported
   (or vice versa), update `generation-plan.md`'s version-support notes AND
   the relevant agent file(s) -- but only add a field if it demonstrably
   improves enforcement (a real `permissionMode` or `maxTurns` key appearing
-  in shipped agents); don't speculatively add fields.
-- Add newly-relevant read-only MCP tools or skills to a delegate's `tools:`
-  allowlist ONLY when they fit that role's existing permission envelope
-  (read-only agents never gain mutating tools). Remove tools for
-  since-removed or disabled servers and plugins.
+  in the documented schema); don't speculatively add fields.
+- **Removing** a tool from a delegate's `tools:` allowlist -- because its
+  server or plugin is gone or disabled -- is automatic: it only ever narrows
+  what a delegate can reach. **Adding** one is not. List proposed additions
+  in the report with the role and the reason, and apply them only after the
+  user agrees, even when the tool is read-only and fits the role's envelope.
 - Never add `Edit`/`Write` to test-validator: they are installed only when
   the user enabled test writes, and the harness withholding them is what
   enforces the read-only default. Same for adding `Agent` to any delegate.
+- Never edit a delegate's prompt body. Step 4 hashes it. Frontmatter
+  (`tools:`, `model:`, `effort:`) is yours; the prose is not. A deliberate
+  prompt change is a re-bless, not a silent edit.
 - Model and effort: **verify, don't interrogate.** Step 4's verifier already
   proves that the agent frontmatter, `orchestration.json` and the README
   configuration table agree. Raise the question with the user only when:
   the verifier reports a disagreement; a role's pinned model no longer
   exists on this account; a materially better tier has appeared; or the user
-  asked for it (`/orchestrate-update models`). Otherwise state the current
+  asked for it (`/orchestrate-sync models`). Otherwise state the current
   assignment in one line of step 5 and change nothing -- a reconciler that
   asks the same question every run is a round-trip that buys nothing.
 
@@ -117,7 +134,7 @@ content that hasn't drifted.
   `validator.allowBuildCommands`/`allowServeCommands`, and -- for test
   writes -- the `Edit, Write` entries in test-validator's `tools:`
   allowlist, which is what actually enforces it. Step 4's verifier fails
-  if the flag and the allowlist disagree, so never leave them half-done.
+  if these disagree, so never leave them half-done.
 - Never touch: workflow limits (max 4 parallel, max 2 correction cycles),
   permission policy (balanced, no bypassPermissions), memory settings,
   `defaultGlobalAgent: false` -- these are user decisions, not discovery
@@ -127,25 +144,28 @@ content that hasn't drifted.
 ### 4. Validate
 
 1. Run the shipped verifier:
-   `python3 {{CLAUDE_DIR}}/orchestrator-spec/verify-install.py {{CLAUDE_DIR}}`
-   It checks the JSON policy invariants, three-way model/effort agreement
-   (frontmatter <-> `orchestration.json` <-> the README configuration table),
-   delegate tool allowlists, each role's mandatory prompt blocks, leftover
-   installer tokens and credential-shaped strings. Fix what it names and
-   re-run until it exits 0. Do not restate its checks here -- that file is
-   the list, and a prose copy is what goes stale.
-2. If `python3` is unavailable, work through the same list by hand by
-   reading `verify-install.py`.
-3. Confirm the `orchestrate` and `orchestrate-update` skills still appear in
+   `PY {{CLAUDE_DIR}}/orchestrator-spec/verify-install.py {{CLAUDE_DIR}}`
+   It checks the JSON policy invariants, that the fanned-out permission flags
+   agree with each other, three-way model/effort agreement (frontmatter <->
+   `orchestration.json` <-> the README configuration table), delegate tool
+   allowlists, each role's mandatory prompt blocks, the blessed prompt-body
+   hashes, leftover installer tokens and credential-shaped strings -- across
+   this bundle's own files only. Fix what it names and re-run until it exits
+   0. Do not restate its checks here -- that file is the list, and a prose
+   copy is what goes stale.
+2. If none of `python3`, `python`, `py -3` runs, work through the same list
+   by hand by reading `verify-install.py`.
+3. Confirm the `orchestrate` and `orchestrate-sync` skills still appear in
    this session's skill listing with valid frontmatter. The verifier reads
    files; only the session can see the live registry.
 
 ### 5. Report
 
 Short summary only -- no file dumps: what changed (version, plugins, MCP
-servers, frontmatter fields, tool allowlist deltas), the current model/effort
-assignment in one line, what was checked and found unchanged, what needs the
-user's explicit decision, and the verifier's result.
+servers, frontmatter fields, tool allowlist deltas), any tool additions
+awaiting the user's approval, the current model/effort assignment in one
+line, what was checked and found unchanged, what needs the user's explicit
+decision, and the verifier's result.
 
 ## Notes
 

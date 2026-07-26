@@ -62,7 +62,7 @@ current code UNVERIFIED.
 11. Status: COMPLETE / PARTIAL / BLOCKED / TIMEOUT -- with compliance
 
 """
-# model = ""  # unset: inherits the Codex session model; /orchestrate-update can pin one
+# model = ""  # unset: inherits the Codex session model; /orchestrate-sync can pin one
 model_reasoning_effort = "medium"
 sandbox_mode = "read-only"
 mcp_servers = {}

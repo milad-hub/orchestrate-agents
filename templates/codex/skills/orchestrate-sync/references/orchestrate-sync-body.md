@@ -1,8 +1,12 @@
-# Orchestrate Update
+# Orchestrate Sync
 
 Full procedure (Codex CLI). Maintenance skill for the orchestrate system in
 `{{CODEX_DIR}}/orchestrator-spec/`. Read-only discovery, then targeted edits
 only where drift is found -- never a blind full regenerate.
+
+`PY` below means the first of `python3`, `python`, `py -3` that runs. On
+Windows `python3` is frequently absent; do not conclude Python is missing
+until all three have failed.
 
 ## Procedure
 
@@ -10,14 +14,22 @@ only where drift is found -- never a blind full regenerate.
 
 Most runs find nothing. Establish that cheaply before spending anything.
 
-1. Compare `codex --version` against the version/date line recorded in
-   `orchestrator-spec/README.md`.
-2. If they match, and the runtime skills listing and the configured MCP
-   server roster show nothing that the delegates' `mcp_servers` maps and
+1. Read `orchestrator-spec/install-state.json` -- `platform`,
+   `bundleVersion`, `cliVersion`, `lastCheckedAt`. Compare `cliVersion`
+   against `codex --version`. A `null` means this is the first run since
+   install, so take the full path once.
+2. If `orchestrator-spec/prompt-hashes.json` is absent, create it now, before
+   any edit in this run: `PY {{CODEX_DIR}}/orchestrator-spec/verify-install.py
+   --bless {{CODEX_DIR}}`. It records a hash of each role's
+   `developer_instructions` so later runs can prove they were not reworded.
+   Blessing first thing matters -- blessing after an edit would bake that
+   edit into the baseline.
+3. If the version matches and the runtime skills listing and the configured
+   MCP server roster show nothing that the delegates' `mcp_servers` maps and
    `capabilities.explicitDeny` do not already account for, go straight to
    step 4, report "no drift", and stop.
 
-Steps 1-3 are for the case where something actually moved.
+Steps 1-3 below are for the case where something actually moved.
 
 ### 1. Re-inspect the installation (live, read-only)
 
@@ -33,21 +45,21 @@ Steps 1-3 are for the case where something actually moved.
   `workflow.maximumParallelWorkers` in `orchestration.json`.
 - TOML field support -- only when the version changed in step 0. On an
   unchanged version this re-derives a fact that cannot have moved. When it
-  did change: sample a few `~/.codex/agents/*.toml` and `.codex/agents/*.toml`
-  (including any shipped by other tools on this machine) and note anything
-  newly supported or newly unsupported versus what this bundle assumes --
-  `name`, `description`, `developer_instructions`, `model`,
-  `model_reasoning_effort`, `sandbox_mode`, `mcp_servers`, `skills.config`.
+  did change, prefer the documented Codex custom-agent schema -- `name`,
+  `description`, `developer_instructions`, `model`, `model_reasoning_effort`,
+  `sandbox_mode`, `mcp_servers`, `skills.config` -- and sample
+  `~/.codex/agents/*.toml` only to corroborate it. Another tool's agent file
+  is evidence of what that tool wrote, not of what Codex supports.
 - Model naming for this account: model IDs change often, so treat a stale
   pin as something to raise in step 3, never to rewrite in passing.
 
 ### 2. Diff against the spec's recorded state
 
 Compare live findings to what is currently written in:
-- `orchestrator-spec/README.md` (environment notes, date/version)
+- `orchestrator-spec/install-state.json` (platform, bundle version, last
+  seen CLI version and check date)
 - `orchestrator-spec/generation-plan.md` (version-support notes)
-- `orchestration.json` + `orchestrator-spec/orchestration.template.json`
-  (`capabilities.explicitDeny`)
+- `orchestration.json` (`capabilities.explicitDeny`)
 - `README-orchestration.md`'s "Excluded capabilities" and "Unsupported / not
   used features" sections -- by name, not by section number; the numbering
   shifts.
@@ -59,28 +71,35 @@ content that hasn't drifted.
 
 ### 3. Apply targeted edits
 
-- Update `capabilities.explicitDeny` in BOTH `orchestration.json` and
-  `orchestrator-spec/orchestration.template.json` to the current
+- Update `capabilities.explicitDeny` in `orchestration.json` to the current
   failed/disabled set (add newly-failed, remove newly-fixed).
+  `orchestrator-spec/orchestration.template.json` is the installer's build
+  input, not live config -- leave it alone.
 - Update the excluded-capabilities and version/date lines in
-  `README-orchestration.md` and `orchestrator-spec/README.md`.
+  `README-orchestration.md`, and write what you saw back into
+  `install-state.json` (`cliVersion`, `lastCheckedAt`).
 - If a previously-unsupported TOML field is now confirmed supported (or vice
   versa), update `generation-plan.md`'s version-support notes AND the
-  relevant `.toml` file(s) -- but only add a field if it demonstrably
-  improves enforcement; don't speculatively add fields.
-- Add newly-relevant read-only MCP servers to a delegate's `mcp_servers` map
-  ONLY when they fit that role's `sandbox_mode` envelope (`read-only` roles
-  never gain a server whose tools plainly mutate state -- inspect its tool
-  descriptions, don't infer from its name). Remove servers that are
-  since-removed or disabled.
+  relevant `.toml` file(s) -- but only add a field if the documented schema
+  confirms it and it demonstrably improves enforcement; don't speculatively
+  add fields.
+- **Removing** a server from a delegate's `mcp_servers` map -- because it is
+  gone or disabled -- is automatic: it only ever narrows what a delegate can
+  reach. **Adding** one is not. List proposed additions in the report with
+  the role and the reason, and apply them only after the user agrees, even
+  when the server looks read-only and fits the role's `sandbox_mode`
+  envelope. Inspect its tool descriptions; never infer from its name.
 - Never widen a delegate's `sandbox_mode`, and never invent a field that
   would let a subagent spawn further subagents.
+- Never edit a delegate's `developer_instructions`. Step 4 hashes it. The
+  surrounding TOML keys are yours; the prompt prose is not. A deliberate
+  prompt change is a re-bless, not a silent edit.
 - Model and reasoning effort: **verify, don't interrogate.** Step 4's
   verifier already proves that each `.toml`, `orchestration.json` and the
   README configuration table agree. Raise the question with the user only
   when: the verifier reports a disagreement; a pinned model no longer exists
   on this account; a materially better option has appeared; or the user
-  asked for it (`/orchestrate-update models`). Otherwise state the current
+  asked for it (`/orchestrate-sync models`). Otherwise state the current
   assignment in one line of step 5 and change nothing -- a reconciler that
   asks the same question every run is a round-trip that buys nothing.
 
@@ -106,7 +125,8 @@ content that hasn't drifted.
   `commands.allowTestFileCreation`,
   `commands.allowBuildCommands`/`allowServeCommands`, and
   `validator.allowBuildCommands`/`allowServeCommands`. The delegates'
-  `sandbox_mode` is not the lever here and must not be widened for it.
+  `sandbox_mode` is not the lever here and must not be widened for it. Step
+  4's verifier fails if these disagree, so never leave them half-done.
 - Never touch: workflow limits (`maximumParallelWorkers`,
   `maximumCorrectionCycles`), permission policy, memory settings,
   `defaultGlobalAgent: false`, or `~/.codex/config.toml`'s `[agents]` values
@@ -117,26 +137,29 @@ content that hasn't drifted.
 ### 4. Validate
 
 1. Run the shipped verifier:
-   `python3 {{CODEX_DIR}}/orchestrator-spec/verify-install.py {{CODEX_DIR}}`
-   It checks the JSON policy invariants, that every `.toml` parses with the
-   right `sandbox_mode`, three-way effort agreement (`.toml` <->
+   `PY {{CODEX_DIR}}/orchestrator-spec/verify-install.py {{CODEX_DIR}}`
+   It checks the JSON policy invariants, that the fanned-out permission flags
+   agree with each other, that every `.toml` parses with the right
+   `sandbox_mode`, three-way effort agreement (`.toml` <->
    `orchestration.json` <-> the README configuration table), each role's
-   mandatory prompt blocks, that the manager has no frontmatter and no
-   `.toml`, leftover installer tokens and credential-shaped strings. Fix
-   what it names and re-run until it exits 0. Do not restate its checks here
-   -- that file is the list, and a prose copy is what goes stale.
-2. If `python3` is unavailable, work through the same list by hand by
-   reading `verify-install.py`.
-3. Confirm the `orchestrate` and `orchestrate-update` skills still appear in
+   mandatory prompt blocks, the blessed prompt-body hashes, that the manager
+   has no frontmatter and no `.toml`, leftover installer tokens and
+   credential-shaped strings -- across this bundle's own files only. Fix what
+   it names and re-run until it exits 0. Do not restate its checks here --
+   that file is the list, and a prose copy is what goes stale.
+2. If none of `python3`, `python`, `py -3` runs, work through the same list
+   by hand by reading `verify-install.py`.
+3. Confirm the `orchestrate` and `orchestrate-sync` skills still appear in
    the runtime skills listing with valid frontmatter. The verifier reads
    files; only the runtime can see the live registry.
 
 ### 5. Report
 
 Short summary only -- no file dumps: what changed (version, MCP servers, TOML
-fields, `mcp_servers` deltas per role), the current model/effort assignment
-in one line, what was checked and found unchanged, what needs the user's
-explicit decision, and the verifier's result.
+fields, `mcp_servers` deltas per role), any server additions awaiting the
+user's approval, the current model/effort assignment in one line, what was
+checked and found unchanged, what needs the user's explicit decision, and the
+verifier's result.
 
 ## Notes
 

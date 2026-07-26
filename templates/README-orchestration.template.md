@@ -25,16 +25,16 @@ User task
 - Runtime config: `{{CLAUDE_DIR}}/orchestration.json`.
 - Agents: `{{CLAUDE_DIR}}/agents/{task-orchestrator,codebase-researcher,implementation-worker,test-validator,result-judge}.md`.
 - Skills: `{{CLAUDE_DIR}}/skills/orchestrate/SKILL.md`,
-  `{{CLAUDE_DIR}}/skills/orchestrate-update/SKILL.md`.
+  `{{CLAUDE_DIR}}/skills/orchestrate-sync/SKILL.md`.
 - This doc: `{{CLAUDE_DIR}}/README-orchestration.md`.
 
 ## 3. Configuration table
 
 Shipped defaults — see your `orchestration.json` for the authoritative
-current values. `/orchestrate-update` owns model and effort: it verifies on
+current values. `/orchestrate-sync` owns model and effort: it verifies on
 every run that this table, the agent frontmatter and `orchestration.json`
 agree, and asks you only when something moved — then writes the answer to
-all three together. Run `/orchestrate-update models` to change them
+all three together. Run `/orchestrate-sync models` to change them
 deliberately. It may also adjust tool allowlists and the deny list; it
 never changes workflow limits or permission policy without asking:
 
@@ -59,7 +59,7 @@ harness withholds them, so the validator cannot write at all.
 
 `orchestrator-spec/verify-install.py` is the executable definition of this
 install's invariants — including that the allowlist above matches
-`validator.allowTestWrites`. `/orchestrate-update` runs it instead of
+`validator.allowTestWrites`. `/orchestrate-sync` runs it instead of
 re-checking them by eye, and you can run it yourself at any time:
 `python3 {{CLAUDE_DIR}}/orchestrator-spec/verify-install.py {{CLAUDE_DIR}}`
 
@@ -178,7 +178,7 @@ manager sanction.
 None by default. This bundle ships with an empty
 `capabilities.explicitDeny` and generic native-tool-only agent allowlists
 — it makes no assumption about what's installed or connected on this
-machine. Run `/orchestrate-update` (required, see §16) to populate the
+machine. Run `/orchestrate-sync` (required, see §16) to populate the
 deny list with anything actually disabled or failing here, and to add
 relevant read-only MCP tools to each delegate's allowlist.
 
@@ -196,7 +196,7 @@ relevant read-only MCP tools to each delegate's allowlist.
 
 Claude Code installations vary — connected MCP servers, plugin
 availability, OS-specific tool behavior, repo-specific command policies.
-This bundle ships without assumptions about any of that; `/orchestrate-update`
+This bundle ships without assumptions about any of that; `/orchestrate-sync`
 inspects *this* installation and reconciles the delegate agents' tool
 allowlists and `capabilities.explicitDeny` accordingly. Run it after
 install and periodically thereafter (new Claude Code version, plugins
@@ -204,7 +204,7 @@ enabled/disabled, MCP servers added/removed).
 
 ## 16. Maintenance
 
-**Run `/orchestrate-update` now, right after installing** — it's what
+**Run `/orchestrate-sync` now, right after installing** — it's what
 populates the deny list and MCP tool allowlists for this machine; the
 bundle works before that too, just with a conservative native-tools-only
 allowlist.
@@ -214,7 +214,7 @@ then ask Claude Code: "Regenerate the orchestration runtime files from
 {{CLAUDE_DIR}}/orchestrator-spec/ per generation-plan.md." Validation
 steps live in generation-plan.md.
 
-`/orchestrate-update` edits narrowly (deny lists, version notes, tool
+`/orchestrate-sync` edits narrowly (deny lists, version notes, tool
 allowlists, frontmatter support) and asks before touching
 models/limits/permissions.
 
@@ -228,7 +228,7 @@ models/limits/permissions.
 - Worker can't edit → check permission prompts (balanced policy still
   prompts); never enable bypassPermissions.
 - MCP tools missing in subagents → the parent session must have the
-  server connected; run `/orchestrate-update`; failed servers are
+  server connected; run `/orchestrate-sync`; failed servers are
   excluded by design.
 - Judge approves nothing → check evidence quality first; the judge
   REJECTs on missing evidence by design.

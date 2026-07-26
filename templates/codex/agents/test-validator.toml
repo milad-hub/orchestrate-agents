@@ -88,7 +88,7 @@ summary line.
     compliance
 
 """
-# model = ""  # unset: inherits the Codex session model; /orchestrate-update can pin one
+# model = ""  # unset: inherits the Codex session model; /orchestrate-sync can pin one
 model_reasoning_effort = "medium"
 sandbox_mode = "workspace-write"
 mcp_servers = {}

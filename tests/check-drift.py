@@ -15,10 +15,12 @@ AGENT_PAIRS = {
 # only the agents were compared. They carry no status vocabulary and no
 # ordered steps, so they get the structural comparison and nothing else.
 SKILL_PAIRS = {
-    "orchestrate-update": (
-        "templates/skills/orchestrate-update/SKILL.md",
-        "templates/codex/skills/orchestrate-update/references/"
-        "orchestrate-update-body.md"),
+    "orchestrate-sync": (
+        "templates/skills/orchestrate-sync/SKILL.md",
+        "templates/codex/skills/orchestrate-sync/references/"
+        "orchestrate-sync-body.md"),
+    "orchestrate": ("templates/skills/orchestrate/SKILL.md",
+                    "templates/codex/skills/orchestrate/SKILL.md"),
 }
 PAIRS = dict(AGENT_PAIRS, **SKILL_PAIRS)
 STOP_WORDS = {

@@ -40,6 +40,12 @@ here.
   in `agents/task-orchestrator.md` apply only to the alternative launch
   `claude --agent task-orchestrator` (identical behavior otherwise). The
   orchestrator is never the default agent.
+- Before adopting the role, run
+  `{{CLAUDE_DIR}}/orchestrator-spec/verify-install.py {{CLAUDE_DIR}}` with the
+  first of `python3`, `python`, `py -3` that runs. If it fails, report what
+  it names and ask whether to continue or run `/orchestrate-sync` first —
+  a delegate that silently lost a tool is cheaper to catch here than three
+  steps into a workflow. Skip the check if no Python is available.
 - If `{{CLAUDE_DIR}}/agents/task-orchestrator.md` or the delegate agent types
   are unavailable, report that the orchestration system is not installed
   correctly and point to {{CLAUDE_DIR}}/README-orchestration.md — do not

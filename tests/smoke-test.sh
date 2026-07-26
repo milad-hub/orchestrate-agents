@@ -44,9 +44,9 @@ check_no_mcp_leak() {
 }
 
 # The install's standing invariants live in orchestrator-spec/verify-install.py
-# -- one executable list, shared with /orchestrate-update. What stays here is
+# -- one executable list, shared with /orchestrate-sync. What stays here is
 # what only a FRESH install can assert: the shipped default values, which the
-# user (or /orchestrate-update) is free to change afterwards.
+# user (or /orchestrate-sync) is free to change afterwards.
 check_json() {
   local file="$1" label="$2"
   "$PY" - "$file" <<'PYEOF' 2>/tmp/smoke_json_err
@@ -119,10 +119,10 @@ run_install() {
   return $?
 }
 
-echo "=== 0/7: template drift (Claude vs Codex) ==="
+echo "=== 0/9: template drift (Claude vs Codex) ==="
 check_drift
 
-echo "=== 1/7: claude-only ==="
+echo "=== 1/9: claude-only ==="
 PROJ="$SCRATCH/claude-only"
 if run_install claude "$PROJ" ORCH_ALLOW_TEST_WRITES=n; then
   pass "claude-only: install.sh exited 0"
@@ -135,7 +135,7 @@ else
   fail "claude-only: install.sh failed: $(cat /tmp/smoke_install_out)"
 fi
 
-echo "=== 2/7: codex-only ==="
+echo "=== 2/9: codex-only ==="
 PROJ="$SCRATCH/codex-only"
 if ORCH_CODEX_CONFIG_PATH_OVERRIDE="$PROJ/.codex/config.toml" run_install codex "$PROJ"; then
   pass "codex-only: install.sh exited 0"
@@ -148,7 +148,7 @@ else
   fail "codex-only: install.sh failed: $(cat /tmp/smoke_install_out)"
 fi
 
-echo "=== 3/7: both ==="
+echo "=== 3/9: both ==="
 PROJ="$SCRATCH/both"
 if ORCH_CODEX_CONFIG_PATH_OVERRIDE="$PROJ/.codex/config.toml" run_install both "$PROJ"; then
   pass "both: install.sh exited 0"
@@ -159,7 +159,7 @@ else
   fail "both: install.sh failed: $(cat /tmp/smoke_install_out)"
 fi
 
-echo "=== 4/7: config.toml -- absent (created) ==="
+echo "=== 4/9: config.toml -- absent (created) ==="
 CFG="$SCRATCH/cfg-absent/config.toml"
 PROJ="$SCRATCH/cfg-absent-proj"
 if ORCH_CODEX_CONFIG_PATH_OVERRIDE="$CFG" run_install codex "$PROJ"; then
@@ -172,7 +172,7 @@ else
   fail "config.toml absent-case: install failed"
 fi
 
-echo "=== 5/7: config.toml -- present, no [agents] (appended) ==="
+echo "=== 5/9: config.toml -- present, no [agents] (appended) ==="
 CFG="$SCRATCH/cfg-noagents/config.toml"
 mkdir -p "$(dirname "$CFG")"
 printf '[other]\nfoo = "bar"\n' > "$CFG"
@@ -187,7 +187,7 @@ else
   fail "config.toml no-agents-case: install failed"
 fi
 
-echo "=== 6/7: config.toml -- present, has [agents] (untouched, warned) ==="
+echo "=== 6/9: config.toml -- has [agents], value is fine (untouched, quiet) ==="
 CFG="$SCRATCH/cfg-hasagents/config.toml"
 mkdir -p "$(dirname "$CFG")"
 printf '[agents]\nmax_concurrent_threads_per_session = 8\n' > "$CFG"
@@ -195,16 +195,37 @@ BEFORE_HASH="$(sha256sum "$CFG" | cut -d' ' -f1)"
 PROJ="$SCRATCH/cfg-hasagents-proj"
 if ORCH_CODEX_CONFIG_PATH_OVERRIDE="$CFG" run_install codex "$PROJ"; then
   AFTER_HASH="$(sha256sum "$CFG" | cut -d' ' -f1)"
-  if [ "$BEFORE_HASH" = "$AFTER_HASH" ] && grep -q "WARNING" /tmp/smoke_install_out; then
-    pass "config.toml has-agents-case: untouched, warning printed"
+  if [ "$BEFORE_HASH" != "$AFTER_HASH" ]; then
+    fail "config.toml has-agents-case: an existing [agents] table was modified"
+  elif grep -q "WARNING" /tmp/smoke_install_out; then
+    fail "config.toml has-agents-case: warned about a value that is already >= 4"
   else
-    fail "config.toml has-agents-case: file was modified or no warning printed"
+    pass "config.toml has-agents-case: untouched, no needless warning"
   fi
 else
   fail "config.toml has-agents-case: install failed"
 fi
 
-echo "=== 7/7: test writes enabled -- validator gains Edit/Write ==="
+echo "=== 7/9: config.toml -- [agents] value too low (specific warning) ==="
+CFG="$SCRATCH/cfg-lowagents/config.toml"
+mkdir -p "$(dirname "$CFG")"
+printf '[agents]\nmax_concurrent_threads_per_session = 2\n' > "$CFG"
+BEFORE_HASH="$(sha256sum "$CFG" | cut -d' ' -f1)"
+PROJ="$SCRATCH/cfg-lowagents-proj"
+if ORCH_CODEX_CONFIG_PATH_OVERRIDE="$CFG" run_install codex "$PROJ"; then
+  AFTER_HASH="$(sha256sum "$CFG" | cut -d' ' -f1)"
+  if [ "$BEFORE_HASH" != "$AFTER_HASH" ]; then
+    fail "config.toml low-agents-case: the file was modified"
+  elif grep -q "max_concurrent_threads_per_session = 2, below the 4" /tmp/smoke_install_out; then
+    pass "config.toml low-agents-case: warned with the actual value"
+  else
+    fail "config.toml low-agents-case: no specific warning: $(cat /tmp/smoke_install_out)"
+  fi
+else
+  fail "config.toml low-agents-case: install failed"
+fi
+
+echo "=== 8/9: test writes enabled -- validator gains Edit/Write ==="
 PROJ="$SCRATCH/testwrites-on"
 if run_install claude "$PROJ" ORCH_ALLOW_TEST_WRITES=y; then
   pass "test-writes-on: install.sh exited 0"
@@ -219,6 +240,57 @@ if run_install claude "$PROJ" ORCH_ALLOW_TEST_WRITES=y; then
   fi
 else
   fail "test-writes-on: install.sh failed: $(cat /tmp/smoke_install_out)"
+fi
+
+# A global install lands in ~/.claude, which on a real machine also holds
+# session transcripts, credentials and plugin trees. The verifier must read
+# only this bundle's files -- every other case installs project-scoped, which
+# is exactly why an earlier whole-root scan went unnoticed.
+echo "=== 9/9: global scope -- verifier must not read the rest of HOME ==="
+FAKEHOME="$SCRATCH/fakehome"
+DECOY="sk-decoy-DEADBEEF0123456789"
+if env ORCH_NONINTERACTIVE=1 ORCH_PLATFORM=claude ORCH_SCOPE=global \
+     HOME="$FAKEHOME" bash "$INSTALL" >/tmp/smoke_install_out 2>&1; then
+  pass "global: install.sh exited 0"
+  # Seeded INSIDE the install root, because that is where the real ones are:
+  # ~/.claude/projects/*.jsonl and ~/.claude/.credentials.json. Seeding them
+  # beside it would leave this case passing against the whole-root walk it
+  # exists to catch.
+  mkdir -p "$FAKEHOME/.claude/projects/junk"
+  printf '{"apiKey": "%s"}\n' "$DECOY" > "$FAKEHOME/.claude/.credentials.json"
+  i=0
+  while [ $i -lt 300 ]; do
+    printf 'token = "%s"\nfiller %d\n' "$DECOY" "$i" \
+      > "$FAKEHOME/.claude/projects/junk/f$i.txt"
+    i=$((i + 1))
+  done
+  start=$SECONDS
+  verify_out="$("$PY" "$REPO_ROOT/templates/orchestrator-spec/verify-install.py" \
+                  "$FAKEHOME/.claude" 2>&1)"
+  verify_rc=$?
+  elapsed=$((SECONDS - start))
+  if [ $verify_rc -eq 0 ]; then
+    pass "global: verify-install.py clean"
+  else
+    fail "global: verify-install.py: $verify_out"
+  fi
+  if printf '%s' "$verify_out" | grep -qF "$DECOY"; then
+    fail "global: verifier echoed a credential value"
+  else
+    pass "global: verifier never echoed a credential value"
+  fi
+  if printf '%s' "$verify_out" | grep -qE 'credentials\.json|projects/junk'; then
+    fail "global: verifier read files outside the bundle"
+  else
+    pass "global: verifier stayed inside the bundle's files"
+  fi
+  if [ "$elapsed" -le 15 ]; then
+    pass "global: verify finished in ${elapsed}s"
+  else
+    fail "global: verify took ${elapsed}s -- it is walking the whole home dir"
+  fi
+else
+  fail "global: install.sh failed: $(cat /tmp/smoke_install_out)"
 fi
 
 echo ""

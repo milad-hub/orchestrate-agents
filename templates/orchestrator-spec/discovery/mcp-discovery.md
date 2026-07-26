@@ -26,6 +26,6 @@ Role policy:
 
 Nothing is known-failed at ship time — this bundle makes no assumption
 about which MCP servers are connected on the target machine. Discovery
-each run (and `/orchestrate-update` once after install) finds whatever is
+each run (and `/orchestrate-sync` once after install) finds whatever is
 actually configured-but-not-connected and adds it to
 `capabilities.explicitDeny`. Do not attempt to repair a failed server.

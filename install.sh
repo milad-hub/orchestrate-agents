@@ -42,23 +42,39 @@ prompt() {
 
 # Arrow-key single-select menu. $1=prompt text, $2=default index, rest=options.
 # Prints the chosen index on stdout; draws the menu on stderr.
+# Redraws rewind a fixed number of rows, so a line that wraps would desync the
+# cursor and leave a trail of half-drawn menus. Clip instead.
+term_cols() {
+  local cols
+  cols="$(tput cols 2>/dev/null || echo 80)"
+  case "$cols" in ''|*[!0-9]*) cols=80 ;; esac
+  if [ "$cols" -lt 20 ]; then cols=20; fi
+  printf '%d' "$((cols - 1))"
+}
+
+clip() {
+  local text="$1" width="$2"
+  printf '%s' "${text:0:width}"
+}
+
 radio_select() {
   local prompt_text="$1" cursor="$2"; shift 2
   local -a opts=("$@")
-  local n=${#opts[@]}
+  local n=${#opts[@]} cols
+  cols="$(term_cols)"
   local old_stty first=1
   old_stty="$(stty -g 2>/dev/null || true)"
   stty -icanon -echo min 1 time 0 2>/dev/null || true
   trap 'stty "$old_stty" 2>/dev/null; exit 130' INT TERM
   while :; do
     if [ "$first" -eq 1 ]; then first=0; else printf '\033[%dA' "$((n + 2))" >&2; fi
-    printf '%s\n' "$prompt_text" >&2
+    printf '%s\n' "$(clip "$prompt_text" "$cols")" >&2
     local i=0
     for opt in "${opts[@]}"; do
       if [ "$i" -eq "$cursor" ]; then
-        printf '  > (x) %s                    \n' "$opt" >&2
+        printf '%s\n' "$(clip "  > (x) $opt                    " "$cols")" >&2
       else
-        printf '    ( ) %s                    \n' "$opt" >&2
+        printf '%s\n' "$(clip "    ( ) $opt                    " "$cols")" >&2
       fi
       i=$((i + 1))
     done
@@ -85,7 +101,8 @@ radio_select() {
 checkbox_select() {
   local prompt_text="$1" defaults_str="$2"; shift 2
   local -a opts=("$@")
-  local n=${#opts[@]}
+  local n=${#opts[@]} cols
+  cols="$(term_cols)"
   local -a checked
   read -r -a checked <<< "$defaults_str"
   local cursor=0 old_stty first=1
@@ -94,14 +111,14 @@ checkbox_select() {
   trap 'stty "$old_stty" 2>/dev/null; exit 130' INT TERM
   while :; do
     if [ "$first" -eq 1 ]; then first=0; else printf '\033[%dA' "$((n + 2))" >&2; fi
-    printf '%s\n' "$prompt_text" >&2
+    printf '%s\n' "$(clip "$prompt_text" "$cols")" >&2
     local i=0
     for opt in "${opts[@]}"; do
       local mark=" "
       if [ "${checked[$i]}" = "1" ]; then mark="x"; fi
       local pointer=" "
       if [ "$i" -eq "$cursor" ]; then pointer=">"; fi
-      printf '  %s [%s] %s                    \n' "$pointer" "$mark" "$opt" >&2
+      printf '%s\n' "$(clip "  $pointer [$mark] $opt                    " "$cols")" >&2
       i=$((i + 1))
     done
     printf '\n' >&2
@@ -220,7 +237,10 @@ existing=""
 if $WANT_CLAUDE && [ -f "$TARGET_CLAUDE_DIR/agents/task-orchestrator.md" ]; then existing="$existing $TARGET_CLAUDE_DIR"; fi
 if $WANT_CODEX && [ -f "$TARGET_CODEX_DIR/agents/task-orchestrator.md" ]; then existing="$existing $TARGET_CODEX_DIR"; fi
 if [ -n "$existing" ]; then
-  overwrite="$(prompt_bool ORCH_OVERWRITE "Existing orchestration install found at:$existing. Overwrite" n)"
+  if [ "${ORCH_NONINTERACTIVE:-0}" != "1" ]; then
+    echo "Existing orchestration install found at:$existing"
+  fi
+  overwrite="$(prompt_bool ORCH_OVERWRITE "Overwrite it" n)"
   if [ "$overwrite" != "true" ]; then
     echo "Aborted -- nothing was changed."
     exit 0
@@ -230,7 +250,7 @@ fi
 # ---- 4. workflow toggles -------------------------------------------------
 
 # Not asked. Both default OFF -- the safe setting -- and stay a permission
-# decision the user makes deliberately. /orchestrate-update flips them (and
+# decision the user makes deliberately. /orchestrate-sync flips them (and
 # the validator's tool allowlist with them) on request.
 ALLOW_TEST_WRITES="$(env_bool ORCH_ALLOW_TEST_WRITES n)"
 ALLOW_BUILD_SERVE="$(env_bool ORCH_ALLOW_BUILD_SERVE n)"
@@ -247,8 +267,8 @@ fi
 # ---- 5. misc tokens ------------------------------------------------------
 
 INSTALL_DATE="$(date +%Y-%m-%d)"
-CLAUDE_VERSION="unknown -- run /orchestrate-update"
-CODEX_VERSION="unknown -- run /orchestrate-update"
+CLAUDE_VERSION="unknown -- run /orchestrate-sync"
+CODEX_VERSION="unknown -- run /orchestrate-sync"
 if $WANT_CLAUDE && command -v claude >/dev/null 2>&1; then
   v="$(claude --version 2>/dev/null | head -n1 || true)"
   if [ -n "$v" ]; then CLAUDE_VERSION="$v"; fi
@@ -307,21 +327,95 @@ copy_tree() {
 
 # ---- 6. config.toml [agents] merge (Codex only, always global) --------
 
+# Must be >= workflow.maximumParallelWorkers in orchestration.template.json.
+REQUIRED_THREADS=4
+
+# The value of max_concurrent_threads_per_session inside the [agents] table,
+# or empty if the table has no such key. Scoped to that table so an identically
+# named key under another section cannot be mistaken for it.
+codex_thread_limit() {
+  awk '/^[[:space:]]*\[agents\][[:space:]]*$/ {inside = 1; next}
+       /^[[:space:]]*\[/ {inside = 0}
+       inside' "$1" \
+    | sed -n 's/^[[:space:]]*max_concurrent_threads_per_session[[:space:]]*=[[:space:]]*\([0-9][0-9]*\).*/\1/p' \
+    | head -n 1
+}
+
 merge_codex_config() {
   local codex_config="${ORCH_CODEX_CONFIG_PATH_OVERRIDE:-$HOME/.codex/config.toml}"
+  local limit
   if [ ! -f "$codex_config" ]; then
     mkdir -p "$(dirname "$codex_config")"
-    printf '[agents]\nmax_concurrent_threads_per_session = 4\n' > "$codex_config"
+    printf '[agents]\nmax_concurrent_threads_per_session = %s\n' "$REQUIRED_THREADS" > "$codex_config"
     echo "Created $codex_config with a default [agents] table."
-  elif grep -q '^\[agents\]' "$codex_config"; then
-    echo "WARNING: $codex_config already has an [agents] section -- not modified. Verify max_concurrent_threads_per_session yourself (should be >= workflow.maximumParallelWorkers in orchestration.json, default 4)."
+  elif grep -q '^[[:space:]]*\[agents\][[:space:]]*$' "$codex_config"; then
+    # Never modified -- an existing [agents] table is the user's. But there is
+    # no reason to make them go read a number the installer can read.
+    limit="$(codex_thread_limit "$codex_config")"
+    if [ -z "$limit" ]; then
+      echo "WARNING: $codex_config has an [agents] table with no"
+      echo "max_concurrent_threads_per_session. Add"
+      echo "'max_concurrent_threads_per_session = $REQUIRED_THREADS' to it, or the"
+      echo "manager may not get the $REQUIRED_THREADS parallel delegates it plans for."
+    elif [ "$limit" -lt "$REQUIRED_THREADS" ]; then
+      echo "WARNING: $codex_config sets"
+      echo "max_concurrent_threads_per_session = $limit, below the $REQUIRED_THREADS parallel"
+      echo "delegates the manager plans for. Raise it to $REQUIRED_THREADS or delegates will"
+      echo "queue. Your config was not modified."
+    fi
   else
-    printf '\n[agents]\nmax_concurrent_threads_per_session = 4\n' >> "$codex_config"
+    printf '\n[agents]\nmax_concurrent_threads_per_session = %s\n' "$REQUIRED_THREADS" >> "$codex_config"
     echo "Appended [agents] table to $codex_config."
   fi
 }
 
 # ---- 7. generate ----------------------------------------------------------
+
+BUNDLE_VERSION=7
+KEPT_CONFIG=""
+
+# Skill directories this bundle shipped under a previous name. copy_tree only
+# writes files, so without this a rename leaves the old skill installed
+# alongside the new one -- both register, and the stale copy describes a
+# procedure that no longer matches the verifier it calls.
+RETIRED_SKILLS="orchestrate-update"
+
+remove_retired_skills() {
+  local dir="$1" name
+  for name in $RETIRED_SKILLS; do
+    if [ -d "$dir/skills/$name" ]; then
+      rm -rf "$dir/skills/$name"
+      REMOVED_SKILLS="$REMOVED_SKILLS $dir/skills/$name"
+    fi
+  done
+}
+REMOVED_SKILLS=""
+
+# Reinstalling replaces the generated tree -- that is what upgrading means --
+# but orchestration.json is not generated content. It carries the models,
+# effort, permission flags and reconciled deny list that /orchestrate-sync
+# wrote for THIS machine, so keep it and let the user reconcile.
+# A stale prompt-hashes.json would mismatch the new prompts on every upgrade,
+# so drop it; the next /orchestrate-sync re-blesses.
+install_config() {
+  local dir="$1"
+  rm -f "$dir/orchestrator-spec/prompt-hashes.json"
+  if [ -f "$dir/orchestration.json" ]; then
+    KEPT_CONFIG="$KEPT_CONFIG $dir"
+  else
+    cp "$dir/orchestrator-spec/orchestration.template.json" "$dir/orchestration.json"
+  fi
+}
+
+# Machine-readable install facts. /orchestrate-sync's fast path compares
+# cliVersion against `claude --version` / `codex --version` and writes back
+# what it saw -- parsing prose out of a README was the previous design and it
+# referred to a line that did not exist.
+write_install_state() {
+  printf '{\n  "platform": "%s",\n  "bundleVersion": %s,\n  "installedAt": "%s",\n  "cliVersion": null,\n  "lastCheckedAt": null\n}\n' \
+    "$2" "$BUNDLE_VERSION" "$(date +%Y-%m-%d)" \
+    > "$1/orchestrator-spec/install-state.json"
+}
 
 if $WANT_CLAUDE; then
   mkdir -p "$TARGET_CLAUDE_DIR"
@@ -331,7 +425,9 @@ if $WANT_CLAUDE; then
   copy_tree "$TEMPLATES/agents" "$TARGET_CLAUDE_DIR/agents"
   copy_tree "$TEMPLATES/skills" "$TARGET_CLAUDE_DIR/skills"
   substitute "$TEMPLATES/README-orchestration.template.md" "$TARGET_CLAUDE_DIR/README-orchestration.md"
-  cp "$TARGET_CLAUDE_DIR/orchestrator-spec/orchestration.template.json" "$TARGET_CLAUDE_DIR/orchestration.json"
+  remove_retired_skills "$TARGET_CLAUDE_DIR"
+  install_config "$TARGET_CLAUDE_DIR"
+  write_install_state "$TARGET_CLAUDE_DIR" claude
 fi
 
 if $WANT_CODEX; then
@@ -342,23 +438,34 @@ if $WANT_CODEX; then
   copy_tree "$TEMPLATES/codex/agents" "$TARGET_CODEX_DIR/agents"
   copy_tree "$TEMPLATES/codex/skills" "$TARGET_CODEX_DIR/skills"
   substitute "$TEMPLATES/codex/README-orchestration.template.md" "$TARGET_CODEX_DIR/README-orchestration.md"
-  cp "$TARGET_CODEX_DIR/orchestrator-spec/orchestration.template.json" "$TARGET_CODEX_DIR/orchestration.json"
+  remove_retired_skills "$TARGET_CODEX_DIR"
+  install_config "$TARGET_CODEX_DIR"
+  write_install_state "$TARGET_CODEX_DIR" codex
   merge_codex_config
 fi
 
-echo ""
-if $WANT_CLAUDE; then echo "Installed to $TARGET_CLAUDE_DIR."; fi
-if $WANT_CODEX; then echo "Installed to $TARGET_CODEX_DIR."; fi
-echo ""
-if $WANT_CLAUDE; then
-  echo "Next (Claude Code): open a session and run /orchestrate-update to"
-  echo "reconcile MCP tool allowlists and the capability denylist against"
-  echo "THIS machine's installed plugins/MCP servers."
-fi
+# One closing message. The next step is identical on both platforms, so
+# saying it twice in different words only makes it easier to skip.
+TARGETS=""
+if $WANT_CLAUDE; then TARGETS="$TARGET_CLAUDE_DIR"; fi
 if $WANT_CODEX; then
-  echo "Next (Codex CLI): open a session and run /orchestrate-update to"
-  echo "reconcile MCP server routing and the capability denylist against"
-  echo "THIS machine's installed MCP servers."
+  if [ -n "$TARGETS" ]; then TARGETS="$TARGETS, $TARGET_CODEX_DIR"
+  else TARGETS="$TARGET_CODEX_DIR"; fi
 fi
-echo "Required before your first real /orchestrate run for full capability"
-echo "coverage -- the bundle works without it too, just conservatively."
+
+echo ""
+echo "Installed to $TARGETS."
+if [ -n "$REMOVED_SKILLS" ]; then
+  echo "Removed skills renamed in this bundle:$REMOVED_SKILLS"
+fi
+if [ -n "$KEPT_CONFIG" ]; then
+  echo "Kept your existing orchestration.json (models, effort, permission"
+  echo "flags, capability deny list). Tool allowlists and MCP routing were"
+  echo "reset to the bundle defaults."
+fi
+echo ""
+echo "Next: open a session and run /orchestrate-sync -- once per platform you"
+echo "installed. It reconciles tool allowlists, MCP routing and the capability"
+echo "deny list against THIS machine, and records the prompt hashes it checks"
+echo "against later. Recommended before your first real /orchestrate run; the"
+echo "bundle works without it, just conservatively."

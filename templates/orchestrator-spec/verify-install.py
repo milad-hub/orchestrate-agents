@@ -1,21 +1,31 @@
 #!/usr/bin/env python3
 """Verify an installed orchestrate bundle.
 
-This file IS the definition of the install's invariants. /orchestrate-update
+This file IS the definition of the install's invariants. /orchestrate-sync
 runs it instead of re-deriving the list in prose, and the smoke suites run it
 against every test install so the list is exercised on every commit.
 
     python3 verify-install.py <install-dir>
+    python3 verify-install.py --bless <install-dir>
 
 <install-dir> is the directory holding orchestration.json, agents/ and
 orchestrator-spec/ -- i.e. ~/.claude or ~/.codex (or a project-scoped
 .claude / .codex). Platform is autodetected from the presence of
 agents/*.toml.
 
-Prints one line per failure and exits non-zero. Silent-ish on success.
+--bless records a SHA-256 of each role's prompt BODY in
+orchestrator-spec/prompt-hashes.json. Later runs check the bodies against it,
+so /orchestrate-sync cannot reword a delegate's prompt while it is in there
+editing frontmatter. Fields the skill is allowed to change (tools/model/effort
+on Claude; everything outside developer_instructions on Codex) are excluded
+from the hash. Re-bless after a deliberate prompt edit.
+
+Only files this bundle installed are ever read -- never the rest of the home
+directory. Prints one line per failure and exits non-zero.
 Stdlib only, no third-party imports, so it runs wherever python3 does.
 """
 import glob
+import hashlib
 import json
 import os
 import re
@@ -63,6 +73,10 @@ MANDATORY_BLOCKS = {
                      "## Capability packet (mandatory)",
                      "## Independence (mandatory)"),
 }
+HASHES = "orchestrator-spec/prompt-hashes.json"
+# Frontmatter fields /orchestrate-sync may legitimately rewrite, so they are
+# excluded from the prompt-body hash.
+MUTABLE_FRONTMATTER = ("tools", "model", "effort")
 
 
 def read(path):
@@ -70,61 +84,110 @@ def read(path):
         return fh.read()
 
 
+# ---------------------------------------------------------------- files ----
+
+def bundle_files(root):
+    """Only what this bundle installed.
+
+    A global install lives in ~/.claude, which also holds session transcripts,
+    credentials and plugin trees -- hundreds of thousands of files that are
+    none of this script's business. Walking the root would be slow and would
+    read secrets that belong to other tools.
+    """
+    found = []
+    for rel in ("orchestration.json", "README-orchestration.md"):
+        path = os.path.join(root, rel)
+        if os.path.isfile(path):
+            found.append(path)
+    for sub in ("agents", "orchestrator-spec"):
+        for dirpath, dirnames, filenames in os.walk(os.path.join(root, sub)):
+            found.extend(os.path.join(dirpath, f) for f in sorted(filenames))
+    skills = os.path.join(root, "skills")
+    if os.path.isdir(skills):
+        for name in sorted(os.listdir(skills)):
+            if not name.startswith("orchestrate"):
+                continue
+            for dirpath, dirnames, filenames in os.walk(
+                    os.path.join(skills, name)):
+                found.extend(os.path.join(dirpath, f) for f in sorted(filenames))
+    return found
+
+
 # ---------------------------------------------------------------- json ----
 
 def check_json(root):
     """Policy invariants that must hold for the life of the install."""
-    docs = {}
-    for rel in ("orchestration.json",
-                "orchestrator-spec/orchestration.template.json"):
-        path = os.path.join(root, rel)
-        if not os.path.isfile(path):
-            fail("%s: missing" % rel)
-            continue
-        try:
-            docs[rel] = json.loads(read(path))
-        except ValueError as exc:
-            fail("%s: does not parse: %s" % (rel, exc))
+    rel = "orchestration.json"
+    path = os.path.join(root, rel)
+    if not os.path.isfile(path):
+        fail("%s: missing" % rel)
+        return {}
+    try:
+        d = json.loads(read(path))
+    except ValueError as exc:
+        fail("%s: does not parse: %s" % (rel, exc))
+        return {}
 
-    for rel, d in docs.items():
-        def want(value, expected, label):
-            if value != expected:
-                fail("%s: %s is %r, expected %r" % (rel, label, value, expected))
+    def want(value, expected, label):
+        if value != expected:
+            fail("%s: %s is %r, expected %r" % (rel, label, value, expected))
 
-        want(d.get("schemaVersion"), 2, "schemaVersion")
-        want(d.get("defaultGlobalAgent"), False, "defaultGlobalAgent")
-        wf = d.get("workflow", {})
-        want(wf.get("maximumParallelWorkers"), 4, "workflow.maximumParallelWorkers")
-        want(wf.get("maximumCorrectionCycles"), 2, "workflow.maximumCorrectionCycles")
-        want(wf.get("maximumAgentRetries"), 0, "workflow.maximumAgentRetries")
-        perm = d.get("permissions", {})
-        want(perm.get("allowBypassPermissions"), False,
-             "permissions.allowBypassPermissions")
-        want(perm.get("allowDestructiveGit"), False,
-             "permissions.allowDestructiveGit")
-        mem = d.get("memory", {})
-        want(mem.get("persistentAgentMemory"), False,
-             "memory.persistentAgentMemory")
-        want(mem.get("allowRepositoryMemoryWrites"), False,
-             "memory.allowRepositoryMemoryWrites")
+    want(d.get("schemaVersion"), 2, "schemaVersion")
+    want(d.get("defaultGlobalAgent"), False, "defaultGlobalAgent")
+    wf = d.get("workflow", {})
+    want(wf.get("maximumParallelWorkers"), 4, "workflow.maximumParallelWorkers")
+    want(wf.get("maximumCorrectionCycles"), 2, "workflow.maximumCorrectionCycles")
+    want(wf.get("maximumAgentRetries"), 0, "workflow.maximumAgentRetries")
+    perm = d.get("permissions", {})
+    want(perm.get("allowBypassPermissions"), False,
+         "permissions.allowBypassPermissions")
+    want(perm.get("allowDestructiveGit"), False,
+         "permissions.allowDestructiveGit")
+    mem = d.get("memory", {})
+    want(mem.get("persistentAgentMemory"), False, "memory.persistentAgentMemory")
+    want(mem.get("allowRepositoryMemoryWrites"), False,
+         "memory.allowRepositoryMemoryWrites")
 
-        for key in ("codebaseResearcher", "implementationWorker",
-                    "testValidator", "resultJudge", "correctionWorker"):
-            if key not in wf.get("agentTimeoutSeconds", {}):
-                fail("%s: workflow.agentTimeoutSeconds.%s missing" % (rel, key))
-        # Flags the manager branches on. Values are the user's choice; their
-        # presence is not.
-        for key in ("allowBuildCommands", "allowServeCommands",
-                    "allowTestFileCreation"):
-            if key not in d.get("commands", {}):
-                fail("%s: commands.%s missing" % (rel, key))
-        if "allowTestWrites" not in d.get("worker", {}):
-            fail("%s: worker.allowTestWrites missing" % rel)
-        for key in ("allowTestWrites", "allowBuildCommands", "allowServeCommands"):
-            if key not in d.get("validator", {}):
-                fail("%s: validator.%s missing" % (rel, key))
+    for key in ("codebaseResearcher", "implementationWorker", "testValidator",
+                "resultJudge", "correctionWorker"):
+        if key not in wf.get("agentTimeoutSeconds", {}):
+            fail("%s: workflow.agentTimeoutSeconds.%s missing" % (rel, key))
+    for key in ("allowBuildCommands", "allowServeCommands",
+                "allowTestFileCreation"):
+        if key not in d.get("commands", {}):
+            fail("%s: commands.%s missing" % (rel, key))
+    if "allowTestWrites" not in d.get("worker", {}):
+        fail("%s: worker.allowTestWrites missing" % rel)
+    for key in ("allowTestWrites", "allowBuildCommands", "allowServeCommands"):
+        if key not in d.get("validator", {}):
+            fail("%s: validator.%s missing" % (rel, key))
 
-    return docs.get("orchestration.json", {})
+    check_flag_agreement(rel, d)
+    return d
+
+
+def check_flag_agreement(rel, d):
+    """One installer answer fans out to several flags; a half-applied edit
+    splits them, and the split is silent -- the worker would write tests the
+    validator is still forbidden to touch."""
+    groups = (
+        ("test writes", (("worker", "allowTestWrites"),
+                         ("validator", "allowTestWrites"),
+                         ("commands", "allowTestFileCreation"))),
+        ("build commands", (("commands", "allowBuildCommands"),
+                            ("validator", "allowBuildCommands"))),
+        ("serve commands", (("commands", "allowServeCommands"),
+                            ("validator", "allowServeCommands"))),
+    )
+    for label, keys in groups:
+        seen = {}
+        for section, key in keys:
+            if key in d.get(section, {}):
+                seen["%s.%s" % (section, key)] = d[section][key]
+        if len(set(seen.values())) > 1:
+            fail("%s: %s flags disagree: %s" % (
+                rel, label,
+                ", ".join("%s=%s" % kv for kv in sorted(seen.items()))))
 
 
 # ------------------------------------------------------------- readme ----
@@ -149,7 +212,7 @@ def readme_table(root):
     return rows
 
 
-# ------------------------------------------------------------- claude ----
+# ------------------------------------------------------- prompt bodies ----
 
 def frontmatter(text):
     """{key: value} from a leading --- YAML block, or None if absent."""
@@ -165,6 +228,83 @@ def frontmatter(text):
             out[m.group(1)] = m.group(2).strip()
     return out
 
+
+def prompt_body(path, root):
+    """The part of a role file that /orchestrate-sync must not rewrite.
+
+    Claude: everything except the frontmatter fields it may change.
+    Codex: the developer_instructions block; the surrounding TOML keys are
+    platform plumbing the skill is allowed to touch.
+    Absolute paths are folded to a placeholder so a moved install still
+    matches its manifest.
+    """
+    text = read(path)
+    if path.endswith(".toml"):
+        _, _, rest = text.partition('developer_instructions = """')
+        body, _, _ = rest.partition('"""')
+        text = body or text
+    else:
+        text = "\n".join(
+            line for line in text.splitlines()
+            if not any(line.startswith(f + ":") for f in MUTABLE_FRONTMATTER))
+    return text.replace(root, "<DIR>").replace(root.replace("\\", "/"), "<DIR>")
+
+
+def role_files(root, is_codex):
+    """stem -> path for every role file that carries a prompt."""
+    out = {}
+    for stem in ROLES:
+        if is_codex:
+            name = stem + (".md" if stem == "task-orchestrator" else ".toml")
+        else:
+            name = stem + ".md"
+        path = os.path.join(root, "agents", name)
+        if os.path.isfile(path):
+            out[stem] = path
+    return out
+
+
+def bless(root, is_codex):
+    manifest = {"note": "SHA-256 of each role's prompt body; see "
+                        "verify-install.py --bless",
+                "bodies": {}}
+    for stem, path in sorted(role_files(root, is_codex).items()):
+        digest = hashlib.sha256(
+            prompt_body(path, root).encode("utf-8")).hexdigest()
+        manifest["bodies"][stem] = "sha256:" + digest
+    out = os.path.join(root, HASHES)
+    with open(out, "w", encoding="utf-8") as fh:
+        json.dump(manifest, fh, indent=2, sort_keys=True)
+        fh.write("\n")
+    return out, len(manifest["bodies"])
+
+
+def check_prompt_hashes(root, is_codex):
+    """No manifest is not a failure -- the first /orchestrate-sync run
+    creates one, before it edits anything."""
+    path = os.path.join(root, HASHES)
+    if not os.path.isfile(path):
+        return
+    try:
+        bodies = json.loads(read(path)).get("bodies", {})
+    except ValueError as exc:
+        fail("%s: does not parse: %s" % (HASHES, exc))
+        return
+    for stem, path_ in sorted(role_files(root, is_codex).items()):
+        expected = bodies.get(stem)
+        if not expected:
+            continue
+        actual = "sha256:" + hashlib.sha256(
+            prompt_body(path_, root).encode("utf-8")).hexdigest()
+        if actual != expected:
+            fail("agents/%s: prompt body changed since it was blessed "
+                 "(expected %s, got %s). /orchestrate-sync may change "
+                 "frontmatter only. If the edit was deliberate, re-bless: "
+                 "verify-install.py --bless <dir>"
+                 % (os.path.basename(path_), expected[:14], actual[:14]))
+
+
+# ------------------------------------------------------------- claude ----
 
 def check_claude(root, cfg, rows):
     for stem, key in ROLES.items():
@@ -276,7 +416,7 @@ def check_codex(root, cfg, rows):
         if values.get("sandbox_mode") != sandbox:
             fail("agents/%s: sandbox_mode is %r, expected %r"
                  % (name, values.get("sandbox_mode"), sandbox))
-        if parsed is not None and parsed.get("mcp_servers") not in ({}, None):
+        if parsed is not None and parsed.get("mcp_servers") is not None:
             if not isinstance(parsed.get("mcp_servers"), dict):
                 fail("agents/%s: mcp_servers must be a table, got %r"
                      % (name, parsed.get("mcp_servers")))
@@ -303,6 +443,9 @@ def check_codex(root, cfg, rows):
 
 # ---------------------------------------------------------------- tree ----
 
+# Category only -- the matched VALUE is never printed. This runs over files
+# that may legitimately contain examples, and echoing a match would put a live
+# secret in the terminal and the transcript.
 SECRET = re.compile(
     r"(?i)\b(api[_-]?key|secret|password|token)\b\s*[:=]\s*[\"']?[A-Za-z0-9/+_-]{16,}")
 # Installer placeholder, e.g. {{CLAUDE_DIR}}. Matching the shape rather than a
@@ -311,41 +454,49 @@ TOKEN = re.compile(r"\{\{[A-Z][A-Z0-9_]*\}\}")
 
 
 def check_tree(root):
-    for dirpath, dirnames, filenames in os.walk(root):
-        dirnames[:] = [d for d in dirnames if d not in (".git", "node_modules")]
-        for fn in filenames:
-            path = os.path.join(dirpath, fn)
-            try:
-                text = read(path)
-            except (UnicodeDecodeError, OSError):
-                continue
-            rel = os.path.relpath(path, root)
-            token = TOKEN.search(text)
-            if token:
-                fail("%s: unsubstituted installer token %s" % (rel, token.group(0)))
-            m = SECRET.search(text)
-            if m:
-                fail("%s: looks like a credential: %s" % (rel, m.group(0)[:40]))
+    for path in bundle_files(root):
+        try:
+            text = read(path)
+        except (UnicodeDecodeError, OSError):
+            continue
+        rel = os.path.relpath(path, root)
+        token = TOKEN.search(text)
+        if token:
+            fail("%s: unsubstituted installer token %s" % (rel, token.group(0)))
+        secret = SECRET.search(text)
+        if secret:
+            fail("%s: line %d looks like a credential (%s) -- value not shown"
+                 % (rel, text.count("\n", 0, secret.start()) + 1,
+                    secret.group(1).lower()))
 
 
 # ---------------------------------------------------------------- main ----
 
 def main(argv):
-    if len(argv) != 2:
+    args = [a for a in argv[1:] if a != "--bless"]
+    blessing = "--bless" in argv[1:]
+    if len(args) != 1:
         print(__doc__.strip())
         return 2
-    root = os.path.abspath(argv[1])
+    root = os.path.abspath(args[0])
     if not os.path.isdir(os.path.join(root, "agents")):
         print("FAIL: %s has no agents/ directory -- not an install root" % root)
         return 2
 
     is_codex = bool(glob.glob(os.path.join(root, "agents", "*.toml")))
+    platform = "codex" if is_codex else "claude"
+
+    if blessing:
+        out, count = bless(root, is_codex)
+        print("Blessed %d prompt bodies -> %s" % (count, out))
+        return 0
+
     cfg = check_json(root)
     rows = readme_table(root)
     (check_codex if is_codex else check_claude)(root, cfg, rows)
+    check_prompt_hashes(root, is_codex)
     check_tree(root)
 
-    platform = "codex" if is_codex else "claude"
     if FAILURES:
         for msg in FAILURES:
             print("FAIL: " + msg)

@@ -55,7 +55,7 @@ platform templates.
 
 ## Version-support notes
 
-`/orchestrate-update` rewrites this section with what it verified against
+`/orchestrate-sync` rewrites this section with what it verified against
 the installed Claude Code version. Until it has run, emit only the
 conservative set:
 

@@ -35,6 +35,12 @@ delegate.
 
 ## Notes
 
+- Before adopting the role, run
+  `{{CODEX_DIR}}/orchestrator-spec/verify-install.py {{CODEX_DIR}}` with the
+  first of `python3`, `python`, `py -3` that runs. If it fails, report what
+  it names and ask whether to continue or run `/orchestrate-sync` first --
+  a delegate that silently lost a server is cheaper to catch here than three
+  steps into a workflow. Skip the check if no Python is available.
 - If `{{CODEX_DIR}}/agents/task-orchestrator.md` or the 4 delegate
   subagent configs are missing, report that the orchestration system is
   not installed correctly and point to

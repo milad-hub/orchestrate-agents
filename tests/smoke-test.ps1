@@ -38,9 +38,9 @@ function Get-Python {
 }
 
 # The install's standing invariants live in orchestrator-spec/verify-install.py
-# -- one executable list, shared with /orchestrate-update. What stays here is
+# -- one executable list, shared with /orchestrate-sync. What stays here is
 # what only a FRESH install can assert: the shipped default values, which the
-# user (or /orchestrate-update) is free to change afterwards.
+# user (or /orchestrate-sync) is free to change afterwards.
 function Test-Json {
     param([string]$File, [string]$Label)
     try {
@@ -126,10 +126,10 @@ function Invoke-Install {
     return $LASTEXITCODE
 }
 
-Write-Host "=== 0/7: template drift (Claude vs Codex) ==="
+Write-Host "=== 0/9: template drift (Claude vs Codex) ==="
 Test-Drift
 
-Write-Host "=== 1/7: claude-only ==="
+Write-Host "=== 1/9: claude-only ==="
 $proj = Join-Path $Scratch "claude-only"
 if ((Invoke-Install "claude" $proj) -eq 0) {
     Test-Pass "claude-only: install.ps1 exited 0"
@@ -142,7 +142,7 @@ if ((Invoke-Install "claude" $proj) -eq 0) {
     Test-Fail "claude-only: install.ps1 failed"
 }
 
-Write-Host "=== 2/7: codex-only ==="
+Write-Host "=== 2/9: codex-only ==="
 $proj = Join-Path $Scratch "codex-only"
 $cfg = Join-Path $proj ".codex\config.toml"
 if ((Invoke-Install "codex" $proj $cfg) -eq 0) {
@@ -156,7 +156,7 @@ if ((Invoke-Install "codex" $proj $cfg) -eq 0) {
     Test-Fail "codex-only: install.ps1 failed"
 }
 
-Write-Host "=== 3/7: both ==="
+Write-Host "=== 3/9: both ==="
 $proj = Join-Path $Scratch "both"
 $cfg = Join-Path $proj ".codex\config.toml"
 if ((Invoke-Install "both" $proj $cfg) -eq 0) {
@@ -168,7 +168,7 @@ if ((Invoke-Install "both" $proj $cfg) -eq 0) {
     Test-Fail "both: install.ps1 failed"
 }
 
-Write-Host "=== 4/7: config.toml -- absent (created) ==="
+Write-Host "=== 4/9: config.toml -- absent (created) ==="
 $cfg = Join-Path $Scratch "cfg-absent\config.toml"
 $proj = Join-Path $Scratch "cfg-absent-proj"
 if ((Invoke-Install "codex" $proj $cfg) -eq 0) {
@@ -181,7 +181,7 @@ if ((Invoke-Install "codex" $proj $cfg) -eq 0) {
     Test-Fail "config.toml absent-case: install failed"
 }
 
-Write-Host "=== 5/7: config.toml -- present, no [agents] (appended) ==="
+Write-Host "=== 5/9: config.toml -- present, no [agents] (appended) ==="
 $cfg = Join-Path $Scratch "cfg-noagents\config.toml"
 New-Item -ItemType Directory -Force -Path (Split-Path $cfg) | Out-Null
 [System.IO.File]::WriteAllText($cfg, "[other]`nfoo = `"bar`"`n")
@@ -197,7 +197,7 @@ if ((Invoke-Install "codex" $proj $cfg) -eq 0) {
     Test-Fail "config.toml no-agents-case: install failed"
 }
 
-Write-Host "=== 6/7: config.toml -- present, has [agents] (untouched, warned) ==="
+Write-Host "=== 6/9: config.toml -- has [agents], value is fine (untouched, quiet) ==="
 $cfg = Join-Path $Scratch "cfg-hasagents\config.toml"
 New-Item -ItemType Directory -Force -Path (Split-Path $cfg) | Out-Null
 [System.IO.File]::WriteAllText($cfg, "[agents]`nmax_concurrent_threads_per_session = 8`n")
@@ -206,16 +206,38 @@ $proj = Join-Path $Scratch "cfg-hasagents-proj"
 if ((Invoke-Install "codex" $proj $cfg) -eq 0) {
     $afterHash = (Get-FileHash $cfg -Algorithm SHA256).Hash
     $installOut = Get-Content (Join-Path $env:TEMP "orch_smoke_install_out.txt") -Raw
-    if ($beforeHash -eq $afterHash -and $installOut -match "WARNING") {
-        Test-Pass "config.toml has-agents-case: untouched, warning printed"
+    if ($beforeHash -ne $afterHash) {
+        Test-Fail "config.toml has-agents-case: an existing [agents] table was modified"
+    } elseif ($installOut -match "WARNING") {
+        Test-Fail "config.toml has-agents-case: warned about a value that is already >= 4"
     } else {
-        Test-Fail "config.toml has-agents-case: file was modified or no warning printed"
+        Test-Pass "config.toml has-agents-case: untouched, no needless warning"
     }
 } else {
     Test-Fail "config.toml has-agents-case: install failed"
 }
 
-Write-Host "=== 7/7: test writes enabled -- validator gains Edit/Write ==="
+Write-Host "=== 7/9: config.toml -- [agents] value too low (specific warning) ==="
+$cfg = Join-Path $Scratch "cfg-lowagents\config.toml"
+New-Item -ItemType Directory -Force -Path (Split-Path $cfg) | Out-Null
+[System.IO.File]::WriteAllText($cfg, "[agents]`nmax_concurrent_threads_per_session = 2`n")
+$beforeHash = (Get-FileHash $cfg -Algorithm SHA256).Hash
+$proj = Join-Path $Scratch "cfg-lowagents-proj"
+if ((Invoke-Install "codex" $proj $cfg) -eq 0) {
+    $afterHash = (Get-FileHash $cfg -Algorithm SHA256).Hash
+    $installOut = Get-Content (Join-Path $env:TEMP "orch_smoke_install_out.txt") -Raw
+    if ($beforeHash -ne $afterHash) {
+        Test-Fail "config.toml low-agents-case: the file was modified"
+    } elseif ($installOut -match "max_concurrent_threads_per_session = 2, below the 4") {
+        Test-Pass "config.toml low-agents-case: warned with the actual value"
+    } else {
+        Test-Fail "config.toml low-agents-case: no specific warning"
+    }
+} else {
+    Test-Fail "config.toml low-agents-case: install failed"
+}
+
+Write-Host "=== 8/9: test writes enabled -- validator gains Edit/Write ==="
 $proj = Join-Path $Scratch "testwrites-on"
 if ((Invoke-Install "claude" $proj "" "y") -eq 0) {
     Test-Pass "test-writes-on: install.ps1 exited 0"
@@ -230,6 +252,69 @@ if ((Invoke-Install "claude" $proj "" "y") -eq 0) {
     }
 } else {
     Test-Fail "test-writes-on: install.ps1 failed"
+}
+
+# A global install lands in ~/.claude, which on a real machine also holds
+# session transcripts, credentials and plugin trees. The verifier must read
+# only this bundle's files -- every other case installs project-scoped, which
+# is exactly why an earlier whole-root scan went unnoticed.
+Write-Host "=== 9/9: global scope -- verifier must not read the rest of HOME ==="
+$fakeHome = Join-Path $Scratch "fakehome"
+$decoy = "sk-decoy-DEADBEEF0123456789"
+$savedHome = $env:USERPROFILE
+$env:USERPROFILE = $fakeHome
+$env:HOME = $fakeHome
+$env:ORCH_NONINTERACTIVE = "1"
+$env:ORCH_PLATFORM = "claude"
+$env:ORCH_SCOPE = "global"
+Remove-Item Env:\ORCH_PROJECT_DIR -ErrorAction SilentlyContinue
+$null = & powershell -NoProfile -ExecutionPolicy Bypass -File $Install 2>&1
+$installRc = $LASTEXITCODE
+$env:USERPROFILE = $savedHome
+Remove-Item Env:\HOME -ErrorAction SilentlyContinue
+if ($installRc -eq 0) {
+    Test-Pass "global: install.ps1 exited 0"
+    # Seeded INSIDE the install root, because that is where the real ones are:
+    # ~/.claude/projects/*.jsonl and ~/.claude/.credentials.json. Seeding them
+    # beside it would leave this case passing against the whole-root walk it
+    # exists to catch.
+    $decoyDir = Join-Path $fakeHome ".claude\projects\junk"
+    New-Item -ItemType Directory -Force -Path $decoyDir | Out-Null
+    [System.IO.File]::WriteAllText(
+        (Join-Path $fakeHome ".claude\.credentials.json"),
+        "{""apiKey"": ""$decoy""}")
+    foreach ($i in 0..299) {
+        [System.IO.File]::WriteAllText((Join-Path $decoyDir "f$i.txt"),
+            "token = ""$decoy""`nfiller $i`n")
+    }
+    $py = Get-Python
+    $sw = [Diagnostics.Stopwatch]::StartNew()
+    $verifyOut = & $py (Join-Path $RepoRoot "templates\orchestrator-spec\verify-install.py") (Join-Path $fakeHome ".claude")
+    $verifyRc = $LASTEXITCODE
+    $sw.Stop()
+    $joined = ($verifyOut -join "`n")
+    if ($verifyRc -eq 0) {
+        Test-Pass "global: verify-install.py clean"
+    } else {
+        Test-Fail "global: verify-install.py: $joined"
+    }
+    if ($joined.Contains($decoy)) {
+        Test-Fail "global: verifier echoed a credential value"
+    } else {
+        Test-Pass "global: verifier never echoed a credential value"
+    }
+    if ($joined -match 'credentials\.json|projects[\\/]junk') {
+        Test-Fail "global: verifier read files outside the bundle"
+    } else {
+        Test-Pass "global: verifier stayed inside the bundle's files"
+    }
+    if ($sw.Elapsed.TotalSeconds -le 15) {
+        Test-Pass ("global: verify finished in {0:N1}s" -f $sw.Elapsed.TotalSeconds)
+    } else {
+        Test-Fail ("global: verify took {0:N1}s -- it is walking the whole home dir" -f $sw.Elapsed.TotalSeconds)
+    }
+} else {
+    Test-Fail "global: install.ps1 failed"
 }
 
 Remove-Item -Recurse -Force $Scratch -ErrorAction SilentlyContinue

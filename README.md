@@ -62,11 +62,27 @@ You'll be asked:
 That's the whole interview — two questions, plus a confirmation if an
 existing install is about to be overwritten.
 
+### Upgrading
+
+Re-run the installer over an existing install. The generated tree — agents,
+skills, spec, README — is replaced; that is what upgrading means. Your
+`orchestration.json` is **kept**, because it holds the models, effort,
+permission flags and capability deny list `/orchestrate-sync` reconciled
+for your machine, and the installer says so when it keeps it.
+
+Agent `tools:` allowlists and Codex `mcp_servers` maps *are* regenerated, on
+purpose: re-deriving them against your current plugins and servers is
+`/orchestrate-sync`'s job, and carrying a stale allowlist forward would
+resurrect entries for things that have since disappeared. So run
+`/orchestrate-sync` after an upgrade. It also re-blesses the prompt-body
+hashes, which the installer clears so a new bundle's prompts don't look like
+tampering.
+
 Everything else ships as a working default. **Test-file writes and
 build/serve commands are OFF**, because widening a permission is a
 deliberate decision, not a question to answer while skimming an
 installer. Turn them on the same way you change anything else after
-install — run `/orchestrate-update`, which flips the flag in
+install — run `/orchestrate-sync`, which flips the flag in
 `orchestration.json` and the validator's tool allowlist together, so the
 two can't disagree. For scripted installs, `ORCH_ALLOW_TEST_WRITES=y`
 and `ORCH_ALLOW_BUILD_SERVE=y` still set them up front.
@@ -74,12 +90,12 @@ and `ORCH_ALLOW_BUILD_SERVE=y` still set them up front.
 The installer does **not** ask about models or effort either. Those ship as
 working defaults — manager opus/high, researcher haiku/medium, worker
 sonnet/medium, validator haiku/medium, judge sonnet/high — and
-`/orchestrate-update` owns them from there. It *verifies* them on every
+`/orchestrate-sync` owns them from there. It *verifies* them on every
 run (the shipped `orchestrator-spec/verify-install.py` checks that the
 agent frontmatter, `orchestration.json` and the README table all agree)
 and raises the question with you only when something actually moved: a
 disagreement, a model that no longer exists on your account, or a better
-tier appearing. Run `/orchestrate-update models` to change them
+tier appearing. Run `/orchestrate-sync models` to change them
 deliberately. (The
 manager's model only binds under `claude --agent task-orchestrator`;
 `/orchestrate` adopts the manager role in your current session, so it
@@ -93,13 +109,13 @@ the installed `README-orchestration.md` for the full rationale.
 **Required next step:** open a session and run
 
 ```
-/orchestrate-update
+/orchestrate-sync
 ```
 
 This bundle ships with **no assumptions** about what's installed on your
 machine — no plugins, no MCP servers, no failed/disabled capabilities are
 pre-baked in, and every Codex subagent ships with an empty `mcp_servers`
-map (table). `/orchestrate-update` inspects *your* live installation once and
+map (table). `/orchestrate-sync` inspects *your* live installation once and
 reconciles the delegate agents' tool allowlists (Claude) or `mcp_servers`
 tables (Codex) and the capability deny-list accordingly. The system works
 before you run it too, just conservatively.
@@ -134,15 +150,15 @@ templates/
   orchestrator-spec/       — shared spec source (edit + regenerate),
                               platform-neutral, used by both generators
   agents/                  — the 5 Claude Code agent definitions
-  skills/                  — Claude Code /orchestrate and /orchestrate-update
+  skills/                  — Claude Code /orchestrate and /orchestrate-sync
   README-orchestration.template.md   — Claude Code doc template
   codex/
     agents/                — 4 Codex subagent .toml configs + the
                               manager's task-orchestrator.md (read as
                               prose, not a registered subagent)
-    skills/                — Codex /orchestrate and /orchestrate-update
+    skills/                — Codex /orchestrate and /orchestrate-sync
                               (the latter's long procedure lives in
-                              references/orchestrate-update-body.md)
+                              references/orchestrate-sync-body.md)
     README-orchestration.template.md   — Codex CLI doc template
 ```
 
@@ -150,7 +166,7 @@ templates/
 
 Re-run the installer (it will ask before overwriting), or edit the
 installed `orchestrator-spec/` directly and ask your session to
-regenerate per its `generation-plan.md`. Run `/orchestrate-update`
+regenerate per its `generation-plan.md`. Run `/orchestrate-sync`
 periodically to keep the capability deny-list and tool/MCP routing in
 sync with your installation as it changes.
 

@@ -32,8 +32,8 @@ at the top level, invoked via the `orchestrate` skill.
 - Subagent configs: `{{CODEX_DIR}}/agents/{codebase-researcher,
   implementation-worker,test-validator,result-judge}.toml`.
 - Skills: `{{CODEX_DIR}}/skills/orchestrate/SKILL.md`,
-  `{{CODEX_DIR}}/skills/orchestrate-update/SKILL.md` (+ its
-  `references/orchestrate-update-body.md`).
+  `{{CODEX_DIR}}/skills/orchestrate-sync/SKILL.md` (+ its
+  `references/orchestrate-sync-body.md`).
 - Global session config: `~/.codex/config.toml` `[agents]` table
   (`max_concurrent_threads_per_session`) — see §6, always global even for
   a project-scoped install.
@@ -42,10 +42,10 @@ at the top level, invoked via the `orchestrate` skill.
 ## 3. Configuration table
 
 Shipped defaults — see your `orchestration.json` for the authoritative
-current values. `/orchestrate-update` owns reasoning effort and any model
+current values. `/orchestrate-sync` owns reasoning effort and any model
 pin: it verifies on every run that this table, the `.toml` files and
 `orchestration.json` agree, and asks you only when something moved — then
-writes the answer to all of them together. Run `/orchestrate-update models`
+writes the answer to all of them together. Run `/orchestrate-sync models`
 to change them deliberately. It may also adjust `mcp_servers` maps and the
 deny list; it never changes workflow limits or permission policy without
 asking:
@@ -53,20 +53,20 @@ asking:
 | Role | Reasoning effort | Model | Write src | Write tests | Sandbox | Spawn | Worktree | MCP |
 |---|---|---|---|---|---|---|---|---|
 | task-orchestrator | n/a (top-level session) | session default | yes | yes | n/a | **yes** | integrates | all (mutations approval-gated) |
-| codebase-researcher | medium | session default unless overridden | no | no | read-only (native) | no | n/a | empty by default, `/orchestrate-update` adds |
+| codebase-researcher | medium | session default unless overridden | no | no | read-only (native) | no | n/a | empty by default, `/orchestrate-sync` adds |
 | implementation-worker | medium | session default unless overridden | assigned scope | default off | workspace-write | no | **automatic** (native) | empty by default |
 | test-validator | medium | session default unless overridden | **no** | default off | workspace-write | no | shared unless runtime isolates | empty by default |
 | result-judge | high | session default unless overridden | no | no | read-only (native) | no | n/a | empty by default |
 
 "Session default unless overridden": each `.toml` ships with its `model`
 line commented out, so the subagent inherits whatever model your Codex
-session is configured to use. Run `/orchestrate-update` to pin a specific
+session is configured to use. Run `/orchestrate-sync` to pin a specific
 model per role — the installer does not ask, because model IDs change too
 often to bake into a shell script and only a live session can see which
 ones your account has.
 
 `orchestrator-spec/verify-install.py` is the executable definition of this
-install's invariants; `/orchestrate-update` runs it instead of re-checking
+install's invariants; `/orchestrate-sync` runs it instead of re-checking
 them by eye, and you can run it yourself at any time:
 `python3 {{CODEX_DIR}}/orchestrator-spec/verify-install.py {{CODEX_DIR}}`
 
@@ -149,7 +149,7 @@ Weaker than some platforms: Codex's discovery surface leans on
 configured/declared state (`config.toml`, `.toml` files) more than a
 live introspected "what's connected right now" tool listing — treat
 "configured" and "actually connected" as separate facts (see
-`orchestrate-update`'s references file, §1).
+`orchestrate-sync`'s references file, §1).
 
 ## 10. Instruction-hierarchy governance
 
@@ -196,14 +196,14 @@ Dependency additions require manager sanction.
 None by default. Every delegate `.toml` ships with `mcp_servers = {}` (an empty TOML map) and
 `orchestration.json`'s `capabilities.explicitDeny` is empty — this bundle
 makes no assumption about what's installed or connected on this machine.
-Run `/orchestrate-update` (required, see §16) to populate both from
+Run `/orchestrate-sync` (required, see §16) to populate both from
 what's actually on this installation.
 
 ## 14. Unsupported / not used features
 
 - Fields not added speculatively: anything beyond `name`, `description`,
   `developer_instructions`, `model`, `model_reasoning_effort`,
-  `sandbox_mode`, `mcp_servers` — add only when `/orchestrate-update`
+  `sandbox_mode`, `mcp_servers` — add only when `/orchestrate-sync`
   confirms a new field is real and demonstrably improves enforcement.
 - Native test-file-vs-production-file write restriction: unsupported
   (see §6) — `sandbox_mode` only has two tiers.
@@ -215,7 +215,7 @@ what's actually on this installation.
 
 Codex installations vary — connected MCP servers, installed skills,
 subagent-field support, sandbox behavior. This bundle ships without
-assumptions about any of that; `/orchestrate-update` inspects *this*
+assumptions about any of that; `/orchestrate-sync` inspects *this*
 installation and reconciles the delegate `mcp_servers` maps and
 `capabilities.explicitDeny` accordingly. Run it after install and
 periodically thereafter (new Codex CLI version, MCP servers
@@ -223,7 +223,7 @@ added/removed).
 
 ## 16. Maintenance
 
-**Run `/orchestrate-update` now, right after installing** — it's what
+**Run `/orchestrate-sync` now, right after installing** — it's what
 populates the deny list and MCP server routing for this machine; the
 bundle works before that too, just with empty `mcp_servers` maps.
 
@@ -242,7 +242,7 @@ then ask your session to regenerate the runtime files per
   is `workspace-write`, not `read-only`.
 - MCP tools missing in a subagent → confirm the server is declared in
   its `.toml`'s `mcp_servers` map AND in `~/.codex/config.toml`
-  `[mcp_servers.*]`; run `/orchestrate-update`.
+  `[mcp_servers.*]`; run `/orchestrate-sync`.
 - Judge approves nothing → check evidence quality first; the judge
   REJECTs on missing evidence by design.
 - Manager ran as a spawned subagent, lost its pipeline → don't invoke

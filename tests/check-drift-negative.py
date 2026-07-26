@@ -15,8 +15,9 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 MANAGER = ROOT / "templates/agents/task-orchestrator.md"
 VALIDATOR = ROOT / "templates/agents/test-validator.md"
 REPORTING = ROOT / "templates/orchestrator-spec/policies/reporting.md"
-CODEX_UPDATE_SKILL = ROOT / ("templates/codex/skills/orchestrate-update/"
-                             "references/orchestrate-update-body.md")
+CODEX_UPDATE_SKILL = ROOT / ("templates/codex/skills/orchestrate-sync/"
+                             "references/orchestrate-sync-body.md")
+CODEX_RUN_SKILL = ROOT / "templates/codex/skills/orchestrate/SKILL.md"
 
 
 def drift():
@@ -66,12 +67,16 @@ results = [
          REPORTING,
          lambda t: re.sub(r"(?m)^- test-validator:.*$\n", "", t),
          "no canonical status line"),
-    # The two orchestrate-update bodies drifted for a whole round while only
+    # The two orchestrate-sync bodies drifted for a whole round while only
     # the agents were compared. Prove the pair is actually in the comparison.
-    case("the two orchestrate-update bodies diverging is rejected",
+    case("the two orchestrate-sync bodies diverging is rejected",
          CODEX_UPDATE_SKILL,
          lambda t: t.replace("### 5. Report", "### 5. Summary", 1),
-         "orchestrate-update heading"),
+         "orchestrate-sync heading"),
+    case("the two orchestrate bodies diverging is rejected",
+         CODEX_RUN_SKILL,
+         lambda t: t.replace("## Notes", "## Caveats", 1),
+         "orchestrate heading"),
 ]
 
 code, out = drift()

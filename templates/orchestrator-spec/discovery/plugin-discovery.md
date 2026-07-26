@@ -19,6 +19,6 @@ Rules:
   orchestration.
 - Nothing is known-disabled at ship time — this bundle makes no
   assumption about which plugins are installed/enabled on the target
-  machine. Discovery each run (and `/orchestrate-update` once after
+  machine. Discovery each run (and `/orchestrate-sync` once after
   install) finds whatever is actually disabled and adds it to
   `capabilities.explicitDeny`.
