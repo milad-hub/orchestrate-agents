@@ -1,10 +1,13 @@
 # Generation Plan
 
-How to (re)generate runtime artifacts from this spec.
+How to reconcile runtime artifacts with this spec and their existing
+platform templates.
 
 ## Inputs
 
 - All files in `{{AGENT_HOME_DIR}}/orchestrator-spec/`
+- Existing runtime agent templates, which own platform syntax and compact
+  role-specific output schemas.
 - Live session inspection: Claude Code version, connected MCP servers,
   enabled plugins, failed/disabled capabilities.
 
@@ -14,17 +17,19 @@ How to (re)generate runtime artifacts from this spec.
    then set `capabilities.explicitDeny` to the currently failed/disabled
    capability names discovered live. Never bake full capability lists in;
    dynamic discovery stays on.
-2. `{{AGENT_HOME_DIR}}/agents/*.md` — one file per spec in `agents/`. Frontmatter
-   uses only fields verified supported on the installed version:
-   `name`, `description`, `model`, `effort`, `tools`, `disallowedTools`.
-   Body embeds the mandatory rules (see below) plus the role spec.
+2. `{{AGENT_HOME_DIR}}/agents/*` — update each existing platform template
+   from its role spec. Preserve its platform syntax and runtime-owned
+   Required output section. Frontmatter uses only fields verified supported
+   on the installed version: `name`, `description`, `model`, `effort`,
+   `tools`, `disallowedTools`.
 3. `{{AGENT_HOME_DIR}}/skills/orchestrate/SKILL.md` — from `skill/orchestrate.spec.md`.
 4. `{{AGENT_HOME_DIR}}/README-orchestration.md` — user documentation.
 
 ## Mandatory rules to embed
 
 - ALL agents: the instruction-hierarchy rule (instructions/instruction-governance.md §Mandatory rule).
-- Manager: dynamic-discovery rule + manager-review rule (agents/task-orchestrator.spec.md).
+- Manager: task-scaled discovery and direct-review gates
+  (agents/task-orchestrator.spec.md).
 - Lower-level agents: capability-packet rule (policies/capability-routing.md §Delegate rule).
 - Judge: independent-verification rule (agents/result-judge.spec.md).
 
@@ -35,30 +40,32 @@ How to (re)generate runtime artifacts from this spec.
   a positive `waitSliceSeconds`, and positive `agentTimeoutSeconds` values
   for every role.
 - Every agent file has valid YAML frontmatter with a known agent name and
-  correct model (opus/haiku/haiku/haiku/sonnet) and effort.
-- Only task-orchestrator's `tools` includes `Agent(...)`.
+  correct model (opus/haiku/sonnet/haiku/sonnet) and effort.
+- task-orchestrator omits `tools:` entirely (it inherits the full set,
+  including Agent); every delegate declares a `tools:` allowlist without
+  Agent.
+- test-validator's allowlist contains `Edit`/`Write` only when test writes
+  were enabled at install time.
 - Researcher and judge have no Edit/Write/NotebookEdit.
-- Validator has Edit/Write but body forbids production-source writes.
+- When enabled, validator Edit/Write remains limited to tests by its body.
 - No `permissionMode: bypassPermissions` anywhere.
 - Skill does not duplicate the manager prompt; it delegates.
 - No credentials in any generated file.
 - Orchestrator is not made the default agent (no settings.json change).
 
-## Version-support notes (Claude Code 2.1.218, re-verified 2026-07-23 via
-/orchestrate-update; scanned all 42 shipped plugin agent files)
+## Version-support notes
 
-- Supported agent frontmatter, DIRECTLY OBSERVED in shipped plugin
-  agents: name, description, model, effort, color, tools, initialPrompt,
-  Agent(...) restriction syntax (inside `tools:`).
-- `disallowedTools` is documented by Claude Code but was NOT observed in
-  any of the 42 sampled shipped agents (all use `tools:` allowlists
-  instead) — treat as unconfirmed on this installation; our generated
-  agents use `tools:` allowlists exclusively, so this doesn't block
-  anything, but don't cite it as verified-supported.
-- NOT verified on this version: maxTurns, memory, mcpServers, skills,
-  isolation, background, permissionMode as frontmatter keys → do not emit;
-  enforce those behaviors at prompt level and via the Agent tool's
-  `isolation` parameter at spawn time.
-- Per-agent effort: supported (`effort:` frontmatter).
-- Worktree isolation: supported as Agent tool spawn parameter
-  `isolation: "worktree"`; manager passes it when spawning workers.
+`/orchestrate-update` rewrites this section with what it verified against
+the installed Claude Code version. Until it has run, emit only the
+conservative set:
+
+- Agent frontmatter: `name`, `description`, `model`, `effort`, `color`,
+  `tools` (including the `Agent(...)` restriction syntax inside `tools:`).
+- `disallowedTools` is documented but unused here — the generated agents
+  use `tools:` allowlists exclusively.
+- Do NOT emit maxTurns, memory, mcpServers, skills, isolation, background,
+  or permissionMode as frontmatter keys → enforce those behaviors at
+  prompt level and via the Agent tool's `isolation` parameter at spawn
+  time.
+- Worktree isolation: Agent tool spawn parameter `isolation: "worktree"`;
+  the manager passes it when spawning workers.

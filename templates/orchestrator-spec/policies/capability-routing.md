@@ -1,54 +1,25 @@
 # Capability Routing
 
-The manager matches discovered capabilities to the task and each subtask.
+Use only live, task-relevant capabilities. Prefer narrow, read-only, and
+already-available options; fall back to built-ins.
 
-## Ranking criteria (in order)
+Packet recommendations name the capability and why it helps. Add priority,
+restrictions, or fallback only when non-obvious. Packet prohibitions list
+only explicit task-relevant bans; do not repeat baseline role restrictions.
+Omit either section when empty.
 
-1. system and policy compliance; 2. instruction-hierarchy compliance; 3. exact
-relevance; 4. availability; 5. role permissions; 6. read-only vs mutating
-needs; 7. trustworthiness; 8. evidence quality; 9. scope specificity;
-10. context efficiency; 11. cost; 12. latency; 13. risk; 14. safe fallback
-availability.
-
-Prefer narrow over broad, read-only over mutating, one capability over two
-overlapping ones. Fall back to built-in tools when nothing better exists.
-Do not force irrelevant capability use.
-
-## RECOMMENDED CAPABILITIES (required packet section)
-
-Per recommendation: exact capability name; type; purpose; expected benefit;
-priority (REQUIRED / PREFERRED / OPTIONAL); permitted usage; restrictions;
-fallback.
-
-## PROHIBITED CAPABILITIES (required packet section)
-
-Include: disabled capabilities; failed capabilities; explicitly denied
-capabilities (`capabilities.explicitDeny`); mutating tools forbidden for the
-role; irrelevant external systems; redundant overlapping skills;
-capabilities conflicting with the project's instruction-hierarchy file (CLAUDE.md for Claude Code, AGENTS.md for Codex CLI); capabilities outside assigned
-scope.
+Skills execute in the invoking agent's context with that agent's
+permissions, so a read-only role must not invoke a mutating skill. Inspect
+a skill's own instructions only when it is seriously considered for use —
+never to inventory what exists.
 
 ## Delegate rule (embedded verbatim in every lower-level agent)
 
-"Review the RECOMMENDED CAPABILITIES and PROHIBITED CAPABILITIES sections
-of the task packet. Use required or preferred capabilities only when
-available, relevant, permitted, and compatible with the applicable instruction-hierarchy file
-rules. You may decline optional capabilities with a reason. Report exactly
-which capabilities you invoked, which you skipped, what outputs they
-produced, and which fallbacks you used."
-
-## Delegate behavior
-
-- PREFERRED/OPTIONAL may be declined with a reason.
-- REQUIRED unavailable ⇒ use the documented fallback and report the gap.
-
-## CAPABILITY USAGE (required report section from every delegate)
-
-recommended capabilities; capabilities invoked; capabilities skipped;
-reasons; fallbacks used; important outputs; failures or ambiguity.
+"Use task-relevant capabilities named in the packet when available and
+permitted. Honor explicit prohibitions. Report only notable use, failure,
+or fallback; never echo the packet."
 
 ## Audits
 
-Manager reviews every delegate's capability usage against the packet.
-Judge audits the routing itself: were relevant capabilities recommended,
-irrelevant ones prohibited, prohibitions honored, usage verified.
+Manager verifies material capability choices. Judge audits routing only
+when it could affect correctness, permissions, or evidence quality.

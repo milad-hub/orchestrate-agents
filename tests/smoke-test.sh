@@ -9,7 +9,14 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 INSTALL="$REPO_ROOT/install.sh"
 SCRATCH="$(mktemp -d)"
 FAILURES=0
-PY="$(command -v python3 2>/dev/null || command -v python 2>/dev/null || true)"
+PY=""
+for candidate in python3 python; do
+  if command -v "$candidate" >/dev/null 2>&1 &&
+     "$candidate" -c "import sys" >/dev/null 2>&1; then
+    PY="$(command -v "$candidate")"
+    break
+  fi
+done
 if [ -z "$PY" ]; then echo "FAIL: no python/python3 on PATH -- JSON/TOML checks cannot run"; exit 1; fi
 
 pass() { echo "PASS: $1"; }
@@ -36,70 +43,70 @@ check_no_mcp_leak() {
   fi
 }
 
+# The install's standing invariants live in orchestrator-spec/verify-install.py
+# -- one executable list, shared with /orchestrate-update. What stays here is
+# what only a FRESH install can assert: the shipped default values, which the
+# user (or /orchestrate-update) is free to change afterwards.
 check_json() {
   local file="$1" label="$2"
   "$PY" - "$file" <<'PYEOF' 2>/tmp/smoke_json_err
 import json, sys
 d = json.load(open(sys.argv[1], encoding="utf-8"))
-assert d["capabilities"]["explicitDeny"] == []
-assert d["defaultGlobalAgent"] == False
-assert d["workflow"]["maximumParallelWorkers"] == 4
-assert d["workflow"]["maximumCorrectionCycles"] == 2
-assert d["workflow"]["maximumAgentRetries"] == 0
+assert d["capabilities"]["explicitDeny"] == [], "deny list should ship empty"
 assert d["workflow"]["waitSliceSeconds"] == 60
 ts = d["workflow"]["agentTimeoutSeconds"]
-assert ts["codebaseResearcher"] == 180 and ts["implementationWorker"] == 600
+assert ts["codebaseResearcher"] == 180 and ts["implementationWorker"] == 900
 assert ts["testValidator"] == 300 and ts["resultJudge"] == 180 and ts["correctionWorker"] == 300
 assert d["workflow"]["requireIndependentJudge"] == False
-assert d["permissions"]["allowBypassPermissions"] == False
-assert "followInstructionHierarchy" in d["instructionGovernance"]
-assert "inspectNestedInstructionFiles" in d["instructionGovernance"]
-assert "followClaudeMdHierarchy" not in d["instructionGovernance"]
+# Pruned in schema 2: they were all-true restatements of the prompt prose.
+assert "instructionGovernance" not in d
+assert "capabilityRouting" not in d
 PYEOF
   if [ $? -eq 0 ]; then
-    pass "$label: orchestration.json valid + invariants hold"
+    pass "$label: orchestration.json ships the documented defaults"
   else
     fail "$label: orchestration.json check failed: $(cat /tmp/smoke_json_err)"
   fi
 }
 
-check_toml() {
+check_verify() {
   local dir="$1" label="$2"
-  "$PY" - "$dir" <<'PYEOF' 2>/tmp/smoke_toml_err
-import sys, glob
-try:
-    import tomllib
-except ImportError:
-    print("tomllib unavailable (py<3.11) -- skipping strict parse", file=sys.stderr)
-    sys.exit(0)
-d = sys.argv[1]
-expect_sandbox = {
-    "codebase-researcher.toml": "read-only",
-    "result-judge.toml": "read-only",
-    "implementation-worker.toml": "workspace-write",
-    "test-validator.toml": "workspace-write",
-}
-for f in glob.glob(d + "/agents/*.toml"):
-    data = open(f, "rb").read()
-    parsed = tomllib.loads(data.decode("utf-8"))
-    name = f.split("/")[-1].split("\\")[-1]
-    assert "name" in parsed and "description" in parsed and "developer_instructions" in parsed
-    assert parsed.get("sandbox_mode") == expect_sandbox[name], (name, parsed.get("sandbox_mode"))
-    assert parsed.get("mcp_servers") == {}, name
-PYEOF
-  if [ $? -eq 0 ]; then
-    pass "$label: all .toml files parse + sandbox_mode correct"
+  if "$PY" "$REPO_ROOT/templates/orchestrator-spec/verify-install.py" "$dir" \
+       >/tmp/smoke_verify_out 2>&1; then
+    pass "$label: verify-install.py clean"
   else
-    fail "$label: TOML check failed: $(cat /tmp/smoke_toml_err)"
+    fail "$label: verify-install.py: $(cat /tmp/smoke_verify_out)"
   fi
 }
 
-check_manager_no_frontmatter() {
-  local file="$1" label="$2"
-  if head -c3 "$file" | grep -q '^---'; then
-    fail "$label: task-orchestrator.md unexpectedly has frontmatter"
+# Proves verify-install.py would fail if the install were broken. Without this
+# a green verify only means it did not complain.
+check_verify_negative() {
+  local dir="$1" label="$2"
+  if "$PY" "$REPO_ROOT/tests/verify-install-negative.py" "$dir" \
+       >/tmp/smoke_verifyneg_out 2>&1; then
+    pass "$label: verify-install.py rejects every corrupted variant"
   else
-    pass "$label: task-orchestrator.md has no frontmatter (correct, not a registered subagent)"
+    fail "$label: verify-install negative cases: $(cat /tmp/smoke_verifyneg_out)"
+  fi
+}
+
+check_worker_model() {
+  # The worker authors production code; a weak default is paid back in
+  # correction cycles, so pin the rendered default.
+  local file="$1" label="$2"
+  if grep -q '^model: sonnet' "$file"; then
+    pass "$label: worker renders model: sonnet (default)"
+  else
+    fail "$label: worker model is not sonnet: $(grep -m1 '^model:' "$file")"
+  fi
+}
+
+check_drift() {
+  if "$PY" "$REPO_ROOT/tests/check-drift.py" >/tmp/smoke_drift_out 2>&1; then
+    pass "templates: structure and step references valid"
+  else
+    fail "templates: Claude/Codex drift: $(cat /tmp/smoke_drift_out)"
   fi
 }
 
@@ -107,40 +114,41 @@ run_install() {
   local platform="$1" projdir="$2"
   shift 2
   mkdir -p "$projdir"
-  ORCH_NONINTERACTIVE=1 ORCH_PLATFORM="$platform" ORCH_SCOPE=project \
+  env ORCH_NONINTERACTIVE=1 ORCH_PLATFORM="$platform" ORCH_SCOPE=project \
     ORCH_PROJECT_DIR="$projdir" "$@" bash "$INSTALL" >/tmp/smoke_install_out 2>&1
   return $?
 }
 
-echo "=== 1/6: claude-only ==="
+echo "=== 0/7: template drift (Claude vs Codex) ==="
+check_drift
+
+echo "=== 1/7: claude-only ==="
 PROJ="$SCRATCH/claude-only"
-if run_install claude "$PROJ"; then
+if run_install claude "$PROJ" ORCH_ALLOW_TEST_WRITES=n; then
   pass "claude-only: install.sh exited 0"
   check_no_tokens "$PROJ/.claude" "claude-only"
   check_json "$PROJ/.claude/orchestration.json" "claude-only"
+  check_verify "$PROJ/.claude" "claude-only"
+  check_verify_negative "$PROJ/.claude" "claude-only"
+  check_worker_model "$PROJ/.claude/agents/implementation-worker.md" "claude-only"
 else
   fail "claude-only: install.sh failed: $(cat /tmp/smoke_install_out)"
 fi
 
-echo "=== 2/6: codex-only ==="
+echo "=== 2/7: codex-only ==="
 PROJ="$SCRATCH/codex-only"
 if ORCH_CODEX_CONFIG_PATH_OVERRIDE="$PROJ/.codex/config.toml" run_install codex "$PROJ"; then
   pass "codex-only: install.sh exited 0"
   check_no_tokens "$PROJ/.codex" "codex-only"
   check_no_mcp_leak "$PROJ/.codex" "codex-only"
   check_json "$PROJ/.codex/orchestration.json" "codex-only"
-  check_toml "$PROJ/.codex" "codex-only"
-  check_manager_no_frontmatter "$PROJ/.codex/agents/task-orchestrator.md" "codex-only"
-  if [ -f "$PROJ/.codex/agents/task-orchestrator.toml" ]; then
-    fail "codex-only: task-orchestrator.toml should not exist (manager is top-level session)"
-  else
-    pass "codex-only: no task-orchestrator.toml (correct)"
-  fi
+  check_verify "$PROJ/.codex" "codex-only"
+  check_verify_negative "$PROJ/.codex" "codex-only"
 else
   fail "codex-only: install.sh failed: $(cat /tmp/smoke_install_out)"
 fi
 
-echo "=== 3/6: both ==="
+echo "=== 3/7: both ==="
 PROJ="$SCRATCH/both"
 if ORCH_CODEX_CONFIG_PATH_OVERRIDE="$PROJ/.codex/config.toml" run_install both "$PROJ"; then
   pass "both: install.sh exited 0"
@@ -151,7 +159,7 @@ else
   fail "both: install.sh failed: $(cat /tmp/smoke_install_out)"
 fi
 
-echo "=== 4/6: config.toml -- absent (created) ==="
+echo "=== 4/7: config.toml -- absent (created) ==="
 CFG="$SCRATCH/cfg-absent/config.toml"
 PROJ="$SCRATCH/cfg-absent-proj"
 if ORCH_CODEX_CONFIG_PATH_OVERRIDE="$CFG" run_install codex "$PROJ"; then
@@ -164,7 +172,7 @@ else
   fail "config.toml absent-case: install failed"
 fi
 
-echo "=== 5/6: config.toml -- present, no [agents] (appended) ==="
+echo "=== 5/7: config.toml -- present, no [agents] (appended) ==="
 CFG="$SCRATCH/cfg-noagents/config.toml"
 mkdir -p "$(dirname "$CFG")"
 printf '[other]\nfoo = "bar"\n' > "$CFG"
@@ -179,7 +187,7 @@ else
   fail "config.toml no-agents-case: install failed"
 fi
 
-echo "=== 6/6: config.toml -- present, has [agents] (untouched, warned) ==="
+echo "=== 6/7: config.toml -- present, has [agents] (untouched, warned) ==="
 CFG="$SCRATCH/cfg-hasagents/config.toml"
 mkdir -p "$(dirname "$CFG")"
 printf '[agents]\nmax_concurrent_threads_per_session = 8\n' > "$CFG"
@@ -194,6 +202,23 @@ if ORCH_CODEX_CONFIG_PATH_OVERRIDE="$CFG" run_install codex "$PROJ"; then
   fi
 else
   fail "config.toml has-agents-case: install failed"
+fi
+
+echo "=== 7/7: test writes enabled -- validator gains Edit/Write ==="
+PROJ="$SCRATCH/testwrites-on"
+if run_install claude "$PROJ" ORCH_ALLOW_TEST_WRITES=y; then
+  pass "test-writes-on: install.sh exited 0"
+  check_no_tokens "$PROJ/.claude" "test-writes-on"
+  # verify-install.py ties the validator's Edit/Write allowlist to
+  # validator.allowTestWrites, so this covers the "with" case too.
+  check_verify "$PROJ/.claude" "test-writes-on"
+  if grep -q '"allowTestWrites": true' "$PROJ/.claude/orchestration.json"; then
+    pass "test-writes-on: orchestration.json records allowTestWrites=true"
+  else
+    fail "test-writes-on: orchestration.json still has allowTestWrites=false"
+  fi
+else
+  fail "test-writes-on: install.sh failed: $(cat /tmp/smoke_install_out)"
 fi
 
 echo ""

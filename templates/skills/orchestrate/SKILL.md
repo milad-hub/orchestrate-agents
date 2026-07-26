@@ -1,6 +1,6 @@
 ---
 name: orchestrate
-description: Run the multi-agent orchestration workflow (manager → researchers → workers → validator → independent judge) for a substantial task. Use ONLY when the user explicitly invokes /orchestrate <task> or asks for orchestrated multi-agent execution. Not for trivial or single-step requests.
+description: Run the multi-agent orchestration workflow (manager → researchers → workers → validator, plus an independent judge for complex or high-risk work) for a substantial task. Use ONLY when the user explicitly invokes /orchestrate <task> or asks for orchestrated multi-agent execution. Not for trivial or single-step requests.
 ---
 
 # Orchestrate
@@ -21,16 +21,10 @@ here.
    you are the manager. Read `{{CLAUDE_DIR}}/orchestration.json` as it
    directs, including the default-off flags for test writes and
    build/serve commands.
-3. Delegate via the Agent tool to `codebase-researcher`,
-   `implementation-worker` (with `isolation: "worktree"`), and
-   `test-validator`; for complex / high-risk / security-sensitive or
-   explicitly requested review submit the completed package to
-   `result-judge`. Respect: ≤4 parallel lower-level agents, disjoint
-   write scopes, ≤2 judge correction cycles, per-role deadlines and
-   bounded wait slices from `workflow.agentTimeoutSeconds` /
-   `waitSliceSeconds`, close-on-timeout with at most
-   `workflow.maximumAgentRetries` retries (default 0), delegation only
-   when useful.
+3. Delegate only the roles selected by the manager procedure. Spawn
+   `implementation-worker` with `isolation: "worktree"`; respect its
+   concurrency, deadline, retry, and correction limits. Delegates notify
+   you when they finish — do not poll.
 4. Permission questions the workflow raises (destructive Git, external
    mutations, default-off overrides) go to the user directly; delegates
    never self-approve.
@@ -42,9 +36,10 @@ here.
 
 ## Notes
 
-- Alternative launch: `claude --agent task-orchestrator` (manager as the
-  main session agent — identical behavior). The orchestrator is never
-  the default agent.
+- You run as the manager on THIS session's model. The `model:`/`effort:`
+  in `agents/task-orchestrator.md` apply only to the alternative launch
+  `claude --agent task-orchestrator` (identical behavior otherwise). The
+  orchestrator is never the default agent.
 - If `{{CLAUDE_DIR}}/agents/task-orchestrator.md` or the delegate agent types
   are unavailable, report that the orchestration system is not installed
   correctly and point to {{CLAUDE_DIR}}/README-orchestration.md — do not

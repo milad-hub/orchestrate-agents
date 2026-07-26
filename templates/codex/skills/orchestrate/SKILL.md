@@ -1,6 +1,6 @@
 ---
 name: orchestrate
-description: "Multi-agent orchestration: manager plans, spawns researcher/worker/validator subagents, independent judge reviews. Use for substantial multi-step tasks via /orchestrate or $orchestrate. Not for trivial single-step requests."
+description: "Multi-agent orchestration: manager plans, spawns researcher/worker/validator subagents, independent judge reviews complex or high-risk work. Use for substantial multi-step tasks via /orchestrate or $orchestrate. Not for trivial single-step requests."
 ---
 
 # Orchestrate
@@ -20,16 +20,10 @@ delegate.
    you are the manager. Read `{{CODEX_DIR}}/orchestration.json` as it
    directs, including the default-off flags for test writes and
    build/serve commands.
-3. Spawn `codebase-researcher`, `implementation-worker`, and
-   `test-validator` as subagents (each gets an automatically isolated git
-   worktree -- no flag to set); for complex / high-risk /
-   security-sensitive or explicitly requested review submit the completed
-   package to `result-judge`. Respect `workflow.maximumParallelWorkers`
-   (default 4) from orchestration.json, disjoint write scopes, up to 2
-   judge correction cycles, per-role deadlines and bounded wait slices
-   from `workflow.agentTimeoutSeconds` / `waitSliceSeconds`,
-   close-on-timeout with at most `workflow.maximumAgentRetries` retries
-   (default 0), delegation only when useful.
+3. Spawn only the subagents selected by the manager procedure.
+   Implementation workers are isolated automatically; treat other
+   subagents as shared unless the runtime says otherwise. Respect the
+   configured concurrency, deadline, wait, retry, and correction limits.
 4. Permission questions the workflow raises (destructive Git, external
    mutations, default-off overrides) go to the user directly; delegates
    never self-approve.

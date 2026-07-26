@@ -1,10 +1,18 @@
 # Orchestrator Specification (Source of Truth)
 
-This directory is the maintainable source for the global multi-agent
-orchestration system. The files under `{{AGENT_HOME_DIR}}/agents/` and
-`{{AGENT_HOME_DIR}}/skills/orchestrate/` plus `{{AGENT_HOME_DIR}}/orchestration.json` are
-**generated build artifacts** derived from these specs. Edit here, then
-regenerate.
+This directory and the runtime templates are **both maintained sources**,
+and will be until a deterministic generator exists:
+
+- These specs define shared behavior and policy — role duties, permission
+  envelopes, instruction governance, validation and judging rules.
+- The runtime templates under `{{AGENT_HOME_DIR}}/agents/` and
+  `{{AGENT_HOME_DIR}}/skills/orchestrate/` own platform syntax (Claude
+  frontmatter vs Codex TOML) and the compact per-role output schemas.
+
+`generation-plan.md` reconciles the two; it takes the existing runtime
+templates as an input, not just this directory. A change to shared
+behavior belongs here first, then in both platform templates. Do not
+describe the runtime files as generated from these specs alone.
 
 ## Layout
 
@@ -24,7 +32,7 @@ regenerate.
 - `{{AGENT_HOME_DIR}}/orchestration.json` — effective runtime config
 - `{{AGENT_HOME_DIR}}/agents/task-orchestrator.md` (opus, high)
 - `{{AGENT_HOME_DIR}}/agents/codebase-researcher.md` (haiku, medium, read-only)
-- `{{AGENT_HOME_DIR}}/agents/implementation-worker.md` (haiku, medium, writes)
+- `{{AGENT_HOME_DIR}}/agents/implementation-worker.md` (sonnet, medium, writes)
 - `{{AGENT_HOME_DIR}}/agents/test-validator.md` (haiku, medium, test-writes only)
 - `{{AGENT_HOME_DIR}}/agents/result-judge.md` (sonnet, high, read-only)
 - `{{AGENT_HOME_DIR}}/skills/orchestrate/SKILL.md`
@@ -44,11 +52,10 @@ agent frontmatter support). It edits narrowly — only what's actually
 drifted — and never touches workflow limits, permission policy, or model
 assignments without asking.
 
-## Environment notes (as of 2026-07-23, Claude Code 2.1.218 — last synced via /orchestrate-update)
+## Environment notes
 
-- Native Read/Grep/Glob are permission-denied globally in this user's
-  settings (lean-ctx shadow routing). Agents rely on lean-ctx `ctx_*` MCP
-  tools and Bash for inspection.
-- Failed/disabled capabilities excluded: `tokensave` (MCP, failing),
-  `chrome-devtools-mcp@claude-plugins-official` (plugin, disabled).
-- Do not repair/enable third-party capabilities as part of orchestration.
+This bundle ships with no assumptions about your machine — no plugins, MCP
+servers, or failed capabilities are baked in. `/orchestrate-update` writes
+what it finds on THIS installation into this section (denied native tools,
+failed/disabled capabilities to exclude, verified frontmatter support).
+Orchestration never repairs or enables third-party capabilities.

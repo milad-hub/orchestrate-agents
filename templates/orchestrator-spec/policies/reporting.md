@@ -11,11 +11,18 @@
 
 ## Delegate reports
 
-Each agent spec defines its numbered required output sections; all include
-CAPABILITY USAGE and a compliance status. Completion statuses:
-COMPLETE / PARTIAL / BLOCKED / TIMEOUT (workers and researchers);
-PASS / PASS_WITH_GAPS / FAIL / BLOCKED / TIMEOUT (validator);
-APPROVE / APPROVE_WITH_NOTES / REJECT (judge).
+Each runtime agent prompt defines its numbered output sections and carries
+compliance in the final status line. Sections are emitted in order only
+when they carry content; capability usage appears only when material.
+Empty/not-applicable sections are omitted (never "N/A" rows), and command
+output is quoted only for failures and the framework's summary line.
+Completion statuses, one line per role (canonical — agent prompts must
+match, `tests/check-drift.py` derives from here):
+
+- codebase-researcher: COMPLETE / PARTIAL / BLOCKED / TIMEOUT
+- implementation-worker: COMPLETE / PARTIAL / BLOCKED / TIMEOUT
+- test-validator: PASS / PASS_WITH_GAPS / FAIL / BLOCKED / TIMEOUT
+- result-judge: APPROVE / APPROVE_WITH_NOTES / REJECT / INCONCLUSIVE
 
 ## Manager's final consolidated response (to the user)
 

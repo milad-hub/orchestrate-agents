@@ -8,10 +8,10 @@ OpenAI Codex CLI. Installed {{INSTALL_DATE}} on Codex CLI {{CODEX_VERSION}}.
 ```
 User task
   → task-orchestrator (top-level session; no subagent config, manager runs here)
-    → codebase-researcher ({{REASONING_EFFORT_RESEARCHER}}, sandbox: read-only)      ─┐ up to
-    → implementation-worker ({{REASONING_EFFORT_WORKER}}, sandbox: workspace-write)  ─┤ 4 parallel
-    → test-validator ({{REASONING_EFFORT_VALIDATOR}}, sandbox: workspace-write)      ─┘ subagents,
-  → result-judge ({{REASONING_EFFORT_JUDGE}}, sandbox: read-only, independent — complex/high-risk or on request)
+    → codebase-researcher (medium, sandbox: read-only)      ─┐ up to
+    → implementation-worker (medium, sandbox: workspace-write)  ─┤ 4 parallel
+    → test-validator (medium, sandbox: workspace-write)      ─┘ subagents,
+  → result-judge (high, sandbox: read-only, independent — complex/high-risk or on request)
   → correction loop (≤2 cycles)
   → one consolidated final response
 ```
@@ -41,23 +41,34 @@ at the top level, invoked via the `orchestrate` skill.
 
 ## 3. Configuration table
 
-As configured at install time — see your `orchestration.json` for the
-authoritative current values (`/orchestrate-update` may adjust
-`mcp_servers` maps and the deny list, never effort/limits without
-asking):
+Shipped defaults — see your `orchestration.json` for the authoritative
+current values. `/orchestrate-update` owns reasoning effort and any model
+pin: it verifies on every run that this table, the `.toml` files and
+`orchestration.json` agree, and asks you only when something moved — then
+writes the answer to all of them together. Run `/orchestrate-update models`
+to change them deliberately. It may also adjust `mcp_servers` maps and the
+deny list; it never changes workflow limits or permission policy without
+asking:
 
 | Role | Reasoning effort | Model | Write src | Write tests | Sandbox | Spawn | Worktree | MCP |
 |---|---|---|---|---|---|---|---|---|
 | task-orchestrator | n/a (top-level session) | session default | yes | yes | n/a | **yes** | integrates | all (mutations approval-gated) |
-| codebase-researcher | {{REASONING_EFFORT_RESEARCHER}} | session default unless overridden | no | no | read-only (native) | no | n/a | empty by default, `/orchestrate-update` adds |
-| implementation-worker | {{REASONING_EFFORT_WORKER}} | session default unless overridden | assigned scope | default off | workspace-write | no | **automatic** (native) | empty by default |
-| test-validator | {{REASONING_EFFORT_VALIDATOR}} | session default unless overridden | **no** | default off | workspace-write | no | automatic | empty by default |
-| result-judge | {{REASONING_EFFORT_JUDGE}} | session default unless overridden | no | no | read-only (native) | no | n/a | empty by default |
+| codebase-researcher | medium | session default unless overridden | no | no | read-only (native) | no | n/a | empty by default, `/orchestrate-update` adds |
+| implementation-worker | medium | session default unless overridden | assigned scope | default off | workspace-write | no | **automatic** (native) | empty by default |
+| test-validator | medium | session default unless overridden | **no** | default off | workspace-write | no | shared unless runtime isolates | empty by default |
+| result-judge | high | session default unless overridden | no | no | read-only (native) | no | n/a | empty by default |
 
-"Session default unless overridden": each `.toml`'s `model` field ships
-blank (omitted) so the subagent inherits whatever model your Codex
-session is configured to use, unless you supplied an explicit override
-at install time.
+"Session default unless overridden": each `.toml` ships with its `model`
+line commented out, so the subagent inherits whatever model your Codex
+session is configured to use. Run `/orchestrate-update` to pin a specific
+model per role — the installer does not ask, because model IDs change too
+often to bake into a shell script and only a live session can see which
+ones your account has.
+
+`orchestrator-spec/verify-install.py` is the executable definition of this
+install's invariants; `/orchestrate-update` runs it instead of re-checking
+them by eye, and you can run it yourself at any time:
+`python3 {{CODEX_DIR}}/orchestrator-spec/verify-install.py {{CODEX_DIR}}`
 
 ## 4. Launch
 
@@ -114,12 +125,11 @@ override these defaults.
 
 ## 8. Worktrees
 
-**Automatic** — each Codex subagent gets its own git worktree created by
-the subagent runtime; no `isolation` flag to set, no manual worktree
-setup. Parallel writes still require disjoint file scopes (automatic
-worktrees prevent collisions, not bad task decomposition). Manager
-inspects the worktree diff, integrates, and re-inspects the integrated
-diff; judge verifies nothing was lost.
+Implementation workers get an automatic isolated worktree. Treat other
+subagents as shared unless the runtime reports isolation. Parallel writes
+still require disjoint file scopes. The manager confirms each subagent's
+location, integrates worker worktrees, and reviews any shared-workspace
+changes directly.
 
 ## 9. Dynamic capability discovery
 
@@ -129,11 +139,11 @@ installation: native tools; installed skills (`~/.codex/skills/`,
 `.codex/agents/`); MCP servers (`~/.codex/config.toml`
 `[mcp_servers.*]`); repository commands; AGENTS.md hierarchy.
 Descriptions are inspected before use — never name-inference. Task
-packets carry RECOMMENDED CAPABILITIES (with REQUIRED/PREFERRED/OPTIONAL
-priority, restrictions, fallback) and PROHIBITED CAPABILITIES. Delegates
-report CAPABILITY USAGE; the manager reviews it; the judge audits
-routing. `orchestration.json` stays free of static capability lists
-except `capabilities.explicitDeny`.
+packets name capabilities or prohibitions only when they materially affect
+the task. Delegates report notable use, failure, or fallback; the manager
+and judge audit routing only when it affects correctness, permissions, or
+evidence. `orchestration.json` stays free of static capability lists except
+`capabilities.explicitDeny`.
 
 Weaker than some platforms: Codex's discovery surface leans on
 configured/declared state (`config.toml`, `.toml` files) more than a
@@ -165,9 +175,9 @@ cycles; still rejected ⇒ status INCOMPLETE with outstanding findings.
 Mandatory violations are never silently waived.
 
 Subagents run under per-role deadlines (`workflow.agentTimeoutSeconds`:
-researcher 180s, worker 600s, validator 300s, judge 180s, correction
+researcher 180s, worker 900s, validator 300s, judge 180s, correction
 worker 300s) with bounded `wait_agent` slices (`waitSliceSeconds`,
-default 60). A subagent that exceeds its deadline is `close_agent`-ed
+default 60). A subagent that exceeds its deadline is interrupted
 immediately; with `maximumAgentRetries` (default 0) the manager does not
 re-run it, completing the scope locally or reporting it as a gap. The
 independent judge is required only for complex/high-risk/security-

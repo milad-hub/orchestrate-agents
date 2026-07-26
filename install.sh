@@ -10,19 +10,14 @@
 #   ORCH_SCOPE=global|project
 #   ORCH_PROJECT_DIR=<path>              (required if ORCH_SCOPE=project)
 #   ORCH_OVERWRITE=y|n
-#   ORCH_ROLE_ORCHESTRATOR=model/effort  (default opus/high)
-#   ORCH_ROLE_RESEARCHER=model/effort    (default haiku/medium)
-#   ORCH_ROLE_WORKER=model/effort        (default haiku/medium)
-#   ORCH_ROLE_VALIDATOR=model/effort     (default haiku/medium)
-#   ORCH_ROLE_JUDGE=model/effort         (default sonnet/high)
-#   ORCH_ALLOW_TEST_WRITES=y|n           (default n)
-#   ORCH_ALLOW_BUILD_SERVE=y|n           (default n)
-#   ORCH_CODEX_MODEL_RESEARCHER=<id>     (default blank = inherit session model)
-#   ORCH_CODEX_MODEL_WORKER=<id>
-#   ORCH_CODEX_MODEL_VALIDATOR=<id>
-#   ORCH_CODEX_MODEL_JUDGE=<id>
 #   ORCH_CODEX_CONFIG_PATH_OVERRIDE=<path>  (test-only; overrides
 #                                             ~/.codex/config.toml target)
+#
+# Permission defaults. Both ship OFF and are NOT asked interactively --
+# widening them is a deliberate decision, not a question to answer while
+# skimming an installer. Honoured in interactive installs too:
+#   ORCH_ALLOW_TEST_WRITES=y|n           (default n)
+#   ORCH_ALLOW_BUILD_SERVE=y|n           (default n)
 
 set -euo pipefail
 
@@ -128,14 +123,20 @@ checkbox_select() {
   printf '%s' "${checked[*]}"
 }
 
+# Env-var only: for settings that are never asked interactively.
+env_bool() {
+  local var="$1" default="$2" reply
+  reply="${!var:-$default}"
+  case "$reply" in
+    y|Y|yes|Yes|true|True) printf 'true' ;;
+    *) printf 'false' ;;
+  esac
+}
+
 prompt_bool() {
-  local var="$1" text="$2" default="$3" reply
+  local var="$1" text="$2" default="$3"
   if [ "${ORCH_NONINTERACTIVE:-0}" = "1" ]; then
-    reply="${!var:-$default}"
-    case "$reply" in
-      y|Y|yes|Yes|true|True) printf 'true' ;;
-      *) printf 'false' ;;
-    esac
+    env_bool "$var" "$default"
     return
   fi
   local default_idx=1
@@ -143,35 +144,6 @@ prompt_bool() {
   local idx
   idx="$(radio_select "$text (Up/Down move, Enter confirm):" "$default_idx" "Yes" "No")"
   if [ "$idx" = "0" ]; then printf 'true'; else printf 'false'; fi
-}
-
-role_prompt() {
-  local var="$1" label="$2" default_model="$3" default_effort="$4" show_model="$5"
-  if [ "${ORCH_NONINTERACTIVE:-0}" = "1" ]; then
-    printf '%s' "${!var:-${default_model}/${default_effort}}"
-    return
-  fi
-  local model="$default_model"
-  if [ "$show_model" = "1" ]; then
-    local -a models=(opus sonnet haiku)
-    local model_idx=0 i=0
-    for m in "${models[@]}"; do
-      if [ "$m" = "$default_model" ]; then model_idx=$i; fi
-      i=$((i + 1))
-    done
-    local mi
-    mi="$(radio_select "$label -- model (Up/Down move, Enter confirm):" "$model_idx" "${models[@]}")"
-    model="${models[$mi]}"
-  fi
-  local -a efforts=(low medium high)
-  local effort_idx=1 i=0
-  for e in "${efforts[@]}"; do
-    if [ "$e" = "$default_effort" ]; then effort_idx=$i; fi
-    i=$((i + 1))
-  done
-  local ei
-  ei="$(radio_select "$label -- effort (Up/Down move, Enter confirm):" "$effort_idx" "${efforts[@]}")"
-  printf '%s/%s' "$model" "${efforts[$ei]}"
 }
 
 # ---- 1. platform choice -------------------------------------------------
@@ -255,51 +227,24 @@ if [ -n "$existing" ]; then
   fi
 fi
 
-# ---- 4. per-role model/effort (always asked; Codex reuses the effort) --
+# ---- 4. workflow toggles -------------------------------------------------
 
-show_model=0
-if $WANT_CLAUDE; then show_model=1; fi
-role_orchestrator="$(role_prompt ORCH_ROLE_ORCHESTRATOR "Manager (task-orchestrator)" opus high "$show_model")"
-role_researcher="$(role_prompt ORCH_ROLE_RESEARCHER "Researcher (codebase-researcher)" haiku medium "$show_model")"
-role_worker="$(role_prompt ORCH_ROLE_WORKER "Worker (implementation-worker)" haiku medium "$show_model")"
-role_validator="$(role_prompt ORCH_ROLE_VALIDATOR "Validator (test-validator)" haiku medium "$show_model")"
-role_judge="$(role_prompt ORCH_ROLE_JUDGE "Judge (result-judge)" sonnet high "$show_model")"
+# Not asked. Both default OFF -- the safe setting -- and stay a permission
+# decision the user makes deliberately. /orchestrate-update flips them (and
+# the validator's tool allowlist with them) on request.
+ALLOW_TEST_WRITES="$(env_bool ORCH_ALLOW_TEST_WRITES n)"
+ALLOW_BUILD_SERVE="$(env_bool ORCH_ALLOW_BUILD_SERVE n)"
 
-MODEL_ORCHESTRATOR="${role_orchestrator%%/*}";  EFFORT_ORCHESTRATOR="${role_orchestrator##*/}"
-MODEL_RESEARCHER="${role_researcher%%/*}";       EFFORT_RESEARCHER="${role_researcher##*/}"
-MODEL_WORKER="${role_worker%%/*}";               EFFORT_WORKER="${role_worker##*/}"
-MODEL_VALIDATOR="${role_validator%%/*}";         EFFORT_VALIDATOR="${role_validator##*/}"
-MODEL_JUDGE="${role_judge%%/*}";                 EFFORT_JUDGE="${role_judge##*/}"
-
-# ---- 5. Codex model overrides (only if Codex is a target) ---------------
-
-REASONING_EFFORT_RESEARCHER="$EFFORT_RESEARCHER"
-REASONING_EFFORT_WORKER="$EFFORT_WORKER"
-REASONING_EFFORT_VALIDATOR="$EFFORT_VALIDATOR"
-REASONING_EFFORT_JUDGE="$EFFORT_JUDGE"
-
-MODEL_OVERRIDE_RESEARCHER=""; MODEL_COMMENT_RESEARCHER="# "
-MODEL_OVERRIDE_WORKER="";     MODEL_COMMENT_WORKER="# "
-MODEL_OVERRIDE_VALIDATOR="";  MODEL_COMMENT_VALIDATOR="# "
-MODEL_OVERRIDE_JUDGE="";      MODEL_COMMENT_JUDGE="# "
-
-if $WANT_CODEX; then
-  MODEL_OVERRIDE_RESEARCHER="$(prompt ORCH_CODEX_MODEL_RESEARCHER "Codex model override for researcher (blank = inherit session default)" "")"
-  MODEL_OVERRIDE_WORKER="$(prompt ORCH_CODEX_MODEL_WORKER "Codex model override for worker (blank = inherit session default)" "")"
-  MODEL_OVERRIDE_VALIDATOR="$(prompt ORCH_CODEX_MODEL_VALIDATOR "Codex model override for validator (blank = inherit session default)" "")"
-  MODEL_OVERRIDE_JUDGE="$(prompt ORCH_CODEX_MODEL_JUDGE "Codex model override for judge (blank = inherit session default)" "")"
-  if [ -n "$MODEL_OVERRIDE_RESEARCHER" ]; then MODEL_COMMENT_RESEARCHER=""; else MODEL_OVERRIDE_RESEARCHER="not set -- inherits session default"; fi
-  if [ -n "$MODEL_OVERRIDE_WORKER" ]; then MODEL_COMMENT_WORKER=""; else MODEL_OVERRIDE_WORKER="not set -- inherits session default"; fi
-  if [ -n "$MODEL_OVERRIDE_VALIDATOR" ]; then MODEL_COMMENT_VALIDATOR=""; else MODEL_OVERRIDE_VALIDATOR="not set -- inherits session default"; fi
-  if [ -n "$MODEL_OVERRIDE_JUDGE" ]; then MODEL_COMMENT_JUDGE=""; else MODEL_OVERRIDE_JUDGE="not set -- inherits session default"; fi
+# The validator only gets Edit/Write in its Claude tools allowlist when test
+# writes are on -- with the default off the harness keeps it read-only, so the
+# rule doesn't depend on the prompt being obeyed.
+if [ "$ALLOW_TEST_WRITES" = "true" ]; then
+  VALIDATOR_WRITE_TOOLS=", Edit, Write"
+else
+  VALIDATOR_WRITE_TOOLS=""
 fi
 
-# ---- 6. workflow toggles -------------------------------------------------
-
-ALLOW_TEST_WRITES="$(prompt_bool ORCH_ALLOW_TEST_WRITES "Allow workers/validator to create or modify test files by default" n)"
-ALLOW_BUILD_SERVE="$(prompt_bool ORCH_ALLOW_BUILD_SERVE "Allow build and serve/dev-server commands by default" n)"
-
-# ---- 7. misc tokens ------------------------------------------------------
+# ---- 5. misc tokens ------------------------------------------------------
 
 INSTALL_DATE="$(date +%Y-%m-%d)"
 CLAUDE_VERSION="unknown -- run /orchestrate-update"
@@ -321,7 +266,6 @@ esc() { printf '%s' "$1" | sed -e 's/[&#\]/\\&/g'; }
 # pass below (it resolves to whichever platform's target dir that pass is
 # writing into); CLAUDE_DIR/CODEX_DIR tokens are fixed for the whole run.
 agent_home_dir_current=""
-model_platform_current=""
 
 # The sed program is identical for every file in a platform pass, so build
 # it once (into the SED_OPTS array) instead of re-running ~12 esc subshells
@@ -329,46 +273,10 @@ model_platform_current=""
 # subshell/process spawn is costly and copy_tree touches ~58 files.
 SED_OPTS=()
 build_sed_opts() {
-  local mo mr mw mv mj
-  if [ "$model_platform_current" = "codex" ]; then
-    mo="inherits Codex session default"
-    mr="$MODEL_OVERRIDE_RESEARCHER"
-    mw="$MODEL_OVERRIDE_WORKER"
-    mv="$MODEL_OVERRIDE_VALIDATOR"
-    mj="$MODEL_OVERRIDE_JUDGE"
-  else
-    mo="$MODEL_ORCHESTRATOR"
-    mr="$MODEL_RESEARCHER"
-    mw="$MODEL_WORKER"
-    mv="$MODEL_VALIDATOR"
-    mj="$MODEL_JUDGE"
-  fi
   SED_OPTS=(
     -e "s#{{AGENT_HOME_DIR}}#$(esc "$agent_home_dir_current")#g"
     -e "s#{{CLAUDE_DIR}}#$(esc "$TARGET_CLAUDE_DIR")#g"
     -e "s#{{CODEX_DIR}}#$(esc "$TARGET_CODEX_DIR")#g"
-    -e "s#{{MODEL_ORCHESTRATOR}}#$(esc "$mo")#g"
-    -e "s/{{EFFORT_ORCHESTRATOR}}/${EFFORT_ORCHESTRATOR}/g"
-    -e "s#{{MODEL_RESEARCHER}}#$(esc "$mr")#g"
-    -e "s/{{EFFORT_RESEARCHER}}/${EFFORT_RESEARCHER}/g"
-    -e "s#{{MODEL_WORKER}}#$(esc "$mw")#g"
-    -e "s/{{EFFORT_WORKER}}/${EFFORT_WORKER}/g"
-    -e "s#{{MODEL_VALIDATOR}}#$(esc "$mv")#g"
-    -e "s/{{EFFORT_VALIDATOR}}/${EFFORT_VALIDATOR}/g"
-    -e "s#{{MODEL_JUDGE}}#$(esc "$mj")#g"
-    -e "s/{{EFFORT_JUDGE}}/${EFFORT_JUDGE}/g"
-    -e "s/{{REASONING_EFFORT_RESEARCHER}}/${REASONING_EFFORT_RESEARCHER}/g"
-    -e "s/{{REASONING_EFFORT_WORKER}}/${REASONING_EFFORT_WORKER}/g"
-    -e "s/{{REASONING_EFFORT_VALIDATOR}}/${REASONING_EFFORT_VALIDATOR}/g"
-    -e "s/{{REASONING_EFFORT_JUDGE}}/${REASONING_EFFORT_JUDGE}/g"
-    -e "s#{{MODEL_OVERRIDE_RESEARCHER}}#$(esc "$MODEL_OVERRIDE_RESEARCHER")#g"
-    -e "s#{{MODEL_OVERRIDE_WORKER}}#$(esc "$MODEL_OVERRIDE_WORKER")#g"
-    -e "s#{{MODEL_OVERRIDE_VALIDATOR}}#$(esc "$MODEL_OVERRIDE_VALIDATOR")#g"
-    -e "s#{{MODEL_OVERRIDE_JUDGE}}#$(esc "$MODEL_OVERRIDE_JUDGE")#g"
-    -e "s/{{MODEL_COMMENT_RESEARCHER}}/${MODEL_COMMENT_RESEARCHER}/g"
-    -e "s/{{MODEL_COMMENT_WORKER}}/${MODEL_COMMENT_WORKER}/g"
-    -e "s/{{MODEL_COMMENT_VALIDATOR}}/${MODEL_COMMENT_VALIDATOR}/g"
-    -e "s/{{MODEL_COMMENT_JUDGE}}/${MODEL_COMMENT_JUDGE}/g"
     -e "s/{{ALLOW_WORKER_TEST_WRITES}}/${ALLOW_TEST_WRITES}/g"
     -e "s/{{ALLOW_VALIDATOR_TEST_WRITES}}/${ALLOW_TEST_WRITES}/g"
     -e "s/{{ALLOW_TEST_FILE_CREATION}}/${ALLOW_TEST_WRITES}/g"
@@ -376,6 +284,7 @@ build_sed_opts() {
     -e "s/{{ALLOW_SERVE_COMMANDS}}/${ALLOW_BUILD_SERVE}/g"
     -e "s/{{ALLOW_VALIDATOR_BUILD_COMMANDS}}/${ALLOW_BUILD_SERVE}/g"
     -e "s/{{ALLOW_VALIDATOR_SERVE_COMMANDS}}/${ALLOW_BUILD_SERVE}/g"
+    -e "s#{{VALIDATOR_WRITE_TOOLS}}#${VALIDATOR_WRITE_TOOLS}#g"
     -e "s/{{INSTALL_DATE}}/${INSTALL_DATE}/g"
     -e "s#{{CLAUDE_VERSION}}#$(esc "$CLAUDE_VERSION")#g"
     -e "s#{{CODEX_VERSION}}#$(esc "$CODEX_VERSION")#g"
@@ -396,7 +305,7 @@ copy_tree() {
   done
 }
 
-# ---- 8. config.toml [agents] merge (Codex only, always global) --------
+# ---- 6. config.toml [agents] merge (Codex only, always global) --------
 
 merge_codex_config() {
   local codex_config="${ORCH_CODEX_CONFIG_PATH_OVERRIDE:-$HOME/.codex/config.toml}"
@@ -412,12 +321,11 @@ merge_codex_config() {
   fi
 }
 
-# ---- 9. generate ----------------------------------------------------------
+# ---- 7. generate ----------------------------------------------------------
 
 if $WANT_CLAUDE; then
   mkdir -p "$TARGET_CLAUDE_DIR"
   agent_home_dir_current="$TARGET_CLAUDE_DIR"
-  model_platform_current="claude"
   build_sed_opts
   copy_tree "$TEMPLATES/orchestrator-spec" "$TARGET_CLAUDE_DIR/orchestrator-spec"
   copy_tree "$TEMPLATES/agents" "$TARGET_CLAUDE_DIR/agents"
@@ -429,7 +337,6 @@ fi
 if $WANT_CODEX; then
   mkdir -p "$TARGET_CODEX_DIR"
   agent_home_dir_current="$TARGET_CODEX_DIR"
-  model_platform_current="codex"
   build_sed_opts
   copy_tree "$TEMPLATES/orchestrator-spec" "$TARGET_CODEX_DIR/orchestrator-spec"
   copy_tree "$TEMPLATES/codex/agents" "$TARGET_CODEX_DIR/agents"

@@ -7,11 +7,11 @@ Code. Installed {{INSTALL_DATE}} on Claude Code {{CLAUDE_VERSION}}.
 
 ```
 User task
-  → task-orchestrator ({{MODEL_ORCHESTRATOR}}, {{EFFORT_ORCHESTRATOR}}) — plan, discover, route, delegate, review
-    → codebase-researcher ({{MODEL_RESEARCHER}}, {{EFFORT_RESEARCHER}}, read-only)   ─┐ ≤4 parallel
-    → implementation-worker ({{MODEL_WORKER}}, {{EFFORT_WORKER}}, worktree)          ─┤ agents,
-    → test-validator ({{MODEL_VALIDATOR}}, {{EFFORT_VALIDATOR}}, test-writes only)   ─┘ disjoint edits
-  → result-judge ({{MODEL_JUDGE}}, {{EFFORT_JUDGE}}, read-only, independent — complex/high-risk or on request)
+  → task-orchestrator (opus, high) — plan, discover, route, delegate, review
+    → codebase-researcher (haiku, medium, read-only)   ─┐ ≤4 parallel
+    → implementation-worker (sonnet, medium, worktree)          ─┤ agents,
+    → test-validator (haiku, medium, test-writes only)   ─┘ disjoint edits
+  → result-judge (sonnet, high, read-only, independent — complex/high-risk or on request)
   → correction loop (≤2 cycles)
   → one consolidated final response
 ```
@@ -30,27 +30,45 @@ User task
 
 ## 3. Configuration table
 
-As configured at install time — see your `orchestration.json` for the
-authoritative current values (`/orchestrate-update` may adjust tool
-allowlists and the deny list, never models/effort/limits without asking):
+Shipped defaults — see your `orchestration.json` for the authoritative
+current values. `/orchestrate-update` owns model and effort: it verifies on
+every run that this table, the agent frontmatter and `orchestration.json`
+agree, and asks you only when something moved — then writes the answer to
+all three together. Run `/orchestrate-update models` to change them
+deliberately. It may also adjust tool allowlists and the deny list; it
+never changes workflow limits or permission policy without asking:
 
 | Agent | Model | Desired effort | Write src | Write tests | Commands | Build | Serve | Spawn | Worktree | MCP | Skills/plugins |
 |---|---|---|---|---|---|---|---|---|---|---|---|
-| task-orchestrator | {{MODEL_ORCHESTRATOR}} | {{EFFORT_ORCHESTRATOR}} | yes | yes | yes | yes | yes | **yes** | integrates | all (mutations approval-gated) | any relevant |
-| codebase-researcher | {{MODEL_RESEARCHER}} | {{EFFORT_RESEARCHER}} | no | no | inspection only | no | no | no | n/a | read-only allowlist | read-only only |
-| implementation-worker | {{MODEL_WORKER}} | {{EFFORT_WORKER}} | assigned scope | default off | yes | default off | default off | no | **yes** (spawned with `isolation: "worktree"`) | read-only allowlist | per packet |
-| test-validator | {{MODEL_VALIDATOR}} | {{EFFORT_VALIDATOR}} | **no** | default off | yes | default off | default off | no | optional | read-only allowlist | per packet |
-| result-judge | {{MODEL_JUDGE}} | {{EFFORT_JUDGE}} | no | no | safe diagnostics | no | no | no | n/a | read-only allowlist | read-only only |
+| task-orchestrator | opus | high | yes | yes | yes | yes | yes | **yes** | integrates | all (mutations approval-gated) | any relevant |
+| codebase-researcher | haiku | medium | no | no | inspection only | no | no | no | n/a | read-only allowlist | read-only only |
+| implementation-worker | sonnet | medium | assigned scope | default off | yes | default off | default off | no | **yes** (spawned with `isolation: "worktree"`) | read-only allowlist | per packet |
+| test-validator | haiku | medium | **no** | default off | yes | default off | default off | no | optional | read-only allowlist | per packet |
+| result-judge | sonnet | high | no | no | safe diagnostics | no | no | no | n/a | read-only allowlist | read-only only |
 
-Per-agent effort IS supported on this version (`effort:` frontmatter,
-confirmed by scanning shipped plugin agents) — desired = effective.
+Per-agent effort is set through `effort:` frontmatter — desired =
+effective.
+
+**The manager row applies to `claude --agent task-orchestrator` only.**
+`/orchestrate` makes your *current* session adopt the manager role, so it
+runs on whatever model and effort that session already uses.
+
+`test-validator` receives `Edit`/`Write` in its `tools:` allowlist only
+when test writes were enabled at install time. With the default off the
+harness withholds them, so the validator cannot write at all.
+
+`orchestrator-spec/verify-install.py` is the executable definition of this
+install's invariants — including that the allowlist above matches
+`validator.allowTestWrites`. `/orchestrate-update` runs it instead of
+re-checking them by eye, and you can run it yourself at any time:
+`python3 {{CLAUDE_DIR}}/orchestrator-spec/verify-install.py {{CLAUDE_DIR}}`
 
 ## 4. Launch
 
 - `claude --agent task-orchestrator` — manager as main session agent.
 - `/orchestrate <task>` — from any session; the session adopts the
   manager role (reads task-orchestrator.md) and spawns the delegates
-  itself. Reason: subagents cannot spawn agents in this harness, so a
+  itself, running on that session's own model. Reason: subagents cannot spawn agents in this harness, so a
   spawned manager would lose its pipeline.
   Example: `/orchestrate add password-reset flow to the web app with tests`.
 - Not the default agent; nothing in `settings.json` is changed by this
@@ -112,11 +130,11 @@ native tools; native/bundled skills; user/project/plugin skills; native/
 user/project/plugin agents; plugin commands and hooks; MCP servers and
 tools; language servers; CLI helpers; repository commands; CLAUDE.md
 hierarchy. Descriptions are inspected before use — never name-inference.
-Task packets carry RECOMMENDED CAPABILITIES (with
-REQUIRED/PREFERRED/OPTIONAL priority, restrictions, fallback) and
-PROHIBITED CAPABILITIES. Delegates report CAPABILITY USAGE; the manager
-reviews it; the judge audits routing. `orchestration.json` stays free of
-static capability lists except `capabilities.explicitDeny`.
+Task packets name capabilities or prohibitions only when they materially
+affect the task. Delegates report notable use, failure, or fallback; the
+manager and judge audit routing only when it affects correctness,
+permissions, or evidence. `orchestration.json` stays free of static
+capability lists except `capabilities.explicitDeny`.
 
 ## 10. CLAUDE.md governance
 
@@ -137,9 +155,11 @@ still rejected ⇒ status INCOMPLETE with outstanding findings. Mandatory
 violations are never silently waived.
 
 Delegates run under per-role deadlines (`workflow.agentTimeoutSeconds`:
-researcher 180s, worker 600s, validator 300s, judge 180s, correction
-worker 300s) with bounded wait slices (`waitSliceSeconds`, default 60).
-A delegate that exceeds its deadline is closed immediately; with
+researcher 180s, worker 900s, validator 300s, judge 180s, correction
+worker 300s). Delegates push a completion notification when they finish,
+so the manager never polls — `waitSliceSeconds` in `orchestration.json`
+applies to Codex only. A delegate that exceeds its deadline is stopped
+immediately; with
 `maximumAgentRetries` (default 0) the manager does not re-run it, and
 completes the scope locally or reports it as a gap. The independent judge
 is required only for complex/high-risk/security-sensitive or explicitly

@@ -29,6 +29,9 @@ preference.
 - APPROVE_WITH_NOTES: only non-blocking issues remain.
 - APPROVE: requirements, instructions, validation, and evidence all
   sufficient.
+- INCONCLUSIVE: the deadline hit before a verdict and no defect was found.
+  Not a rejection — it routes to the manager's compliance gate, not the
+  correction loop, and must list exactly what went unreviewed.
 
 Findings carry: severity (BLOCKER/HIGH/MEDIUM/LOW); file and location;
 evidence; impact; recommended correction.

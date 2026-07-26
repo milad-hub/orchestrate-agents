@@ -19,9 +19,10 @@ User task
 The manager discovers whatever tools, skills, agents, and MCP servers are
 actually available in the current session and routes them to the right
 delegate for each subtask — it never assumes a fixed toolset. Read-only
-research runs in parallel; writes are scoped and worktree-isolated; a
-validator checks the result; an independent judge reviews both the work
-and the manager's own process before anything is reported done.
+research runs in parallel; worker writes are worktree-isolated and all
+writes are scoped and reviewed; a validator checks the result; an
+independent judge reviews both the work and the manager's own process
+before anything is reported done.
 
 ## Requirements
 
@@ -57,17 +58,33 @@ You'll be asked:
    install — Codex has no per-project config file for it. Your existing
    `config.toml` is never overwritten; an existing `[agents]` table is
    left untouched with a warning.)
-3. **Model + effort** for each of the 5 roles (manager/researcher/worker/
-   validator/judge), with sensible defaults shown — press Enter to
-   accept them. (If Codex is selected, effort doubles as its
-   `model_reasoning_effort`; you're also asked for an optional per-role
-   Codex model override — blank means the subagent inherits your Codex
-   session's default model, since model IDs change too often to bake in
-   a default.)
-4. **Whether workers/validator may create test files by default** (off
-   by default).
-5. **Whether build/serve commands are allowed by default** (off by
-   default).
+
+That's the whole interview — two questions, plus a confirmation if an
+existing install is about to be overwritten.
+
+Everything else ships as a working default. **Test-file writes and
+build/serve commands are OFF**, because widening a permission is a
+deliberate decision, not a question to answer while skimming an
+installer. Turn them on the same way you change anything else after
+install — run `/orchestrate-update`, which flips the flag in
+`orchestration.json` and the validator's tool allowlist together, so the
+two can't disagree. For scripted installs, `ORCH_ALLOW_TEST_WRITES=y`
+and `ORCH_ALLOW_BUILD_SERVE=y` still set them up front.
+
+The installer does **not** ask about models or effort either. Those ship as
+working defaults — manager opus/high, researcher haiku/medium, worker
+sonnet/medium, validator haiku/medium, judge sonnet/high — and
+`/orchestrate-update` owns them from there. It *verifies* them on every
+run (the shipped `orchestrator-spec/verify-install.py` checks that the
+agent frontmatter, `orchestration.json` and the README table all agree)
+and raises the question with you only when something actually moved: a
+disagreement, a model that no longer exists on your account, or a better
+tier appearing. Run `/orchestrate-update models` to change them
+deliberately. (The
+manager's model only binds under `claude --agent task-orchestrator`;
+`/orchestrate` adopts the manager role in your current session, so it
+runs on that session's model. Codex delegates ship with no model pinned
+and inherit the Codex session model.)
 
 Everything else (parallelism limits, permission policy, worktree
 isolation, correction-loop limits) ships as fixed, safe defaults — see

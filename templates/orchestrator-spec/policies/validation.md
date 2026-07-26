@@ -8,10 +8,13 @@ writes nothing and runs no build/serve commands unless the user explicitly
 enables them for the run (manager records the override). Missing coverage
 is reported under Coverage gaps.
 
-May: read the whole repository; create/modify test files; create temporary
-fixtures; update snapshots when justified; run tests, builds, serve
-commands, lint, type checks, E2E tools, benchmarks, package scripts, local
-diagnostics.
+May: read the whole repository; run tests, lint, type checks, E2E tools,
+benchmarks, package scripts, local diagnostics.
+
+Packet-gated (default off): creating or modifying test files and temporary
+fixtures and updating snapshots when justified (with test writes off the
+installed tools allowlist withholds Edit/Write entirely); running builds;
+running serve commands.
 
 Must NOT: modify production source code. If a production change is needed,
 report the required correction to the manager, which delegates it to an
@@ -35,5 +38,5 @@ Serve commands: collect runtime evidence, then terminate.
 - commands not run (with reason);
 - incomplete coverage (what remains unvalidated).
 
-Never present an unexecuted test as passing. Readiness verdict:
-PASS / PASS_WITH_GAPS / FAIL / BLOCKED.
+Never present an unexecuted test as passing. Readiness verdicts are
+defined once in policies/reporting.md — do not restate them here.

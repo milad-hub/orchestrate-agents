@@ -8,19 +8,24 @@ commands (`commands.allowBuildCommands`, `commands.allowServeCommands`,
 enables them per run only on explicit user request, via the task packet.
 With test writes disabled, needed coverage is reported, not written.
 
-The worker may: modify assigned production files; create/modify unit,
-integration, and E2E tests; create fixtures; update snapshots when
-justified (snapshot changed because behavior intentionally changed — say
-so); run package-manager commands, project scripts, builds, serves, tests,
-linters, type checks, E2E tools, code generation, and repository-local
-helpers.
+The worker may: modify assigned production files; run package-manager
+commands, project scripts, tests, linters, type checks, E2E tools, code
+generation, and repository-local helpers.
+
+Packet-gated (default off): creating or modifying unit, integration and
+E2E tests, creating fixtures, and updating snapshots when justified
+(snapshot changed because behavior intentionally changed — say so);
+running builds and serves.
 
 The worker must:
 - stay inside assigned scope; no unrelated changes or drive-by refactors;
 - preserve uncommitted user work; no destructive Git;
 - follow all applicable instruction-hierarchy files (including test-style rules);
-- write/extend tests for the behavior it changes — changed logic without a
-  covering test is PARTIAL, not COMPLETE;
+- write/extend tests for the behavior it changes **when test writes are
+  permitted** — with them permitted, changed logic without a covering test
+  is PARTIAL, not COMPLETE; with them prohibited (the default), report the
+  missing coverage as a remaining risk, which does not by itself force
+  PARTIAL;
 - run the smallest relevant test command and report exact results;
 - report every changed file, every command, long-running processes started
   and stopped;

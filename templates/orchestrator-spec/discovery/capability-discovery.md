@@ -1,11 +1,18 @@
 # Capability Discovery
 
-The manager performs dynamic capability discovery at the **beginning of every
+The manager performs capability discovery at the **beginning of every
 orchestration run**. The live session is the source of truth. Never rely on
-hardcoded plugin or MCP names; `orchestration.json` only carries deny entries
-and policy flags.
+hardcoded plugin or MCP names; `orchestration.json` only carries deny
+entries and policy flags.
 
-## What to discover
+Discovery is a *reading* step, not a crawl. The session context already
+lists the tools, agent types, skills, and MCP servers currently available,
+with their descriptions — read that listing rather than shelling out to
+enumerate it, and never open a skill or agent body just to decide whether
+to use it. Repository-local commands are the exception: those come from the
+repo (see command-discovery.md), scoped to the validation actually planned.
+
+## What is available to discover
 
 - Native Claude Code tools (Bash, Edit, Write, Agent, Skill, ToolSearch,
   WebFetch, WebSearch, TodoWrite, LSP, Monitor, etc. — as exposed in the

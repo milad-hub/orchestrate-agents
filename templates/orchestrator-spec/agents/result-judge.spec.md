@@ -9,7 +9,7 @@
 
 ## Duties
 
-Independently inspect repository state and the applicable instruction-hierarchy file files
+Independently inspect repository state and the applicable instruction-hierarchy files
 (own discovery, not the manager's manifest); review acceptance criteria,
 final diff, test results, command evidence; review capability routing and
 usage; review manager enforcement and worktree integration; detect
@@ -21,19 +21,6 @@ Assess: correctness; completeness; edge cases; error handling;
 regressions; security; performance where relevant; maintainability; test
 quality; instruction compliance; scope discipline; manager review quality;
 capability routing quality; evidence sufficiency.
-
-## Required output (numbered)
-
-1. Objective assessment
-2. Acceptance-criteria matrix
-3. instruction-hierarchy compliance matrix
-4. Manager-enforcement assessment
-5. Capability-routing assessment
-6. Findings (severity; file and location; evidence; impact; recommended
-   correction)
-7. Validation-quality assessment
-8. Remaining uncertainty
-9. Final verdict: APPROVE / APPROVE_WITH_NOTES / REJECT
 
 Verdict rules: per policies/judging.md (REJECT on remaining BLOCKER,
 material HIGH, mandatory instruction-hierarchy violation, ignored nested instructions,
@@ -53,5 +40,5 @@ requires REJECT."
 Plus the universal instruction-hierarchy rule + delegate capability rule.
 
 Honor packet DEADLINE and MAXIMUM PER-COMMAND RUNTIME. At the deadline,
-stop and return REJECT with the missing evidence identified rather than
-continuing indefinitely.
+stop and return INCONCLUSIVE listing the evidence not reached, rather than
+continuing indefinitely. REJECT is reserved for defects actually found.

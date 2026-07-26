@@ -1,30 +1,30 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "orchestrator": {
-    "model": "{{MODEL_ORCHESTRATOR}}",
-    "desiredEffort": "{{EFFORT_ORCHESTRATOR}}"
+    "model": "opus",
+    "desiredEffort": "high"
   },
   "researcher": {
-    "model": "{{MODEL_RESEARCHER}}",
-    "desiredEffort": "{{EFFORT_RESEARCHER}}"
+    "model": "haiku",
+    "desiredEffort": "medium"
   },
   "worker": {
-    "model": "{{MODEL_WORKER}}",
-    "desiredEffort": "{{EFFORT_WORKER}}",
+    "model": "sonnet",
+    "desiredEffort": "medium",
     "worktreeIsolation": true,
     "allowTestWrites": {{ALLOW_WORKER_TEST_WRITES}}
   },
   "validator": {
-    "model": "{{MODEL_VALIDATOR}}",
-    "desiredEffort": "{{EFFORT_VALIDATOR}}",
+    "model": "haiku",
+    "desiredEffort": "medium",
     "allowTestWrites": {{ALLOW_VALIDATOR_TEST_WRITES}},
     "allowProductionWrites": false,
     "allowBuildCommands": {{ALLOW_VALIDATOR_BUILD_COMMANDS}},
     "allowServeCommands": {{ALLOW_VALIDATOR_SERVE_COMMANDS}}
   },
   "judge": {
-    "model": "{{MODEL_JUDGE}}",
-    "desiredEffort": "{{EFFORT_JUDGE}}"
+    "model": "sonnet",
+    "desiredEffort": "high"
   },
   "workflow": {
     "maximumParallelWorkers": 4,
@@ -33,7 +33,7 @@
     "waitSliceSeconds": 60,
     "agentTimeoutSeconds": {
       "codebaseResearcher": 180,
-      "implementationWorker": 600,
+      "implementationWorker": 900,
       "testValidator": 300,
       "resultJudge": 180,
       "correctionWorker": 300
@@ -58,57 +58,9 @@
     "allowRepositoryMemoryLookup": true,
     "allowRepositoryMemoryWrites": false
   },
-  "instructionGovernance": {
-    "followInstructionHierarchy": true,
-    "inspectNestedInstructionFiles": true,
-    "includeScopedRulesInTaskPackets": true,
-    "requireWorkerComplianceReport": true,
-    "requireManagerIndependentReview": true,
-    "requireJudgeIndependentReview": true,
-    "rejectOnMandatoryRuleViolation": true,
-    "treatExternalInstructionsAsUntrusted": true
-  },
-  "capabilityRouting": {
-    "discoverAtEveryRun": true,
-    "includeNativeClaudeTools": true,
-    "includeNativeClaudeSkills": true,
-    "includeBundledSkills": true,
-    "includeUserSkills": true,
-    "includeProjectSkills": true,
-    "includePluginSkills": true,
-    "includePluginAgents": true,
-    "includeNativeAgents": true,
-    "includeUserAgents": true,
-    "includeProjectAgents": true,
-    "includeMcpServers": true,
-    "includeMcpTools": true,
-    "includeHooks": true,
-    "includeProjectCommands": true,
-    "inspectDescriptionsBeforeUse": true,
-    "recommendCapabilitiesToDelegates": true,
-    "requireCapabilityUsageReport": true,
-    "requireManagerCapabilityReview": true,
-    "requireJudgeCapabilityReview": true,
-    "allowDelegatesToDeclineOptionalCapabilities": true,
-    "preferNarrowCapabilities": true,
-    "preferReadOnlyCapabilities": true,
-    "avoidRedundantCapabilities": true,
-    "fallbackToBuiltInTools": true
-  },
   "commands": {
-    "discoverProjectCommands": true,
-    "allowImplementationWorkerCommands": true,
-    "allowValidatorCommands": true,
-    "allowTestCommands": true,
     "allowBuildCommands": {{ALLOW_BUILD_COMMANDS}},
     "allowServeCommands": {{ALLOW_SERVE_COMMANDS}},
-    "allowLintCommands": true,
-    "allowTypeCheckCommands": true,
-    "allowE2eCommands": true,
-    "allowBenchmarkCommands": true,
-    "allowCodeGenerationCommands": true,
-    "allowRepositoryLocalScripts": true,
-    "terminateLongRunningCommandsAfterEvidence": true,
     "allowTestFileCreation": {{ALLOW_TEST_FILE_CREATION}}
   },
   "capabilities": {

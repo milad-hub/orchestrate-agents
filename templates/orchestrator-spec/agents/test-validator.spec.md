@@ -1,10 +1,15 @@
 # test-validator
 
 - Model: haiku. Desired effort: medium.
-- May: read entire repository; create/modify test files; create temporary
-  fixtures; update snapshots when justified; run tests, builds, serve
-  commands, lint, type checks, E2E tools, benchmarks, package scripts,
-  local diagnostics.
+- May: read entire repository; run tests, lint, type checks, E2E tools,
+  benchmarks, package scripts, local diagnostics.
+- Packet-gated (default off in `orchestration.json`): creating or
+  modifying test files and temporary fixtures and updating snapshots
+  (`validator.allowTestWrites` — with it off the installed `tools:`
+  allowlist withholds Edit/Write entirely, so missing coverage is
+  reported under Coverage gaps); running builds
+  (`validator.allowBuildCommands`) and serve commands
+  (`validator.allowServeCommands`).
 - Must NOT: modify production source code (hard prompt rule — native
   config cannot scope writes to test files; manager diff review + judge
   audit back it up). Needed production change ⇒ report the required
@@ -12,7 +17,7 @@
 
 ## Duties
 
-Inspect the applicable instruction-hierarchy file testing rules; inspect the final diff; run
+Inspect the applicable instruction-hierarchy testing rules; inspect the final diff; run
 the smallest useful validation, expanding as risk requires; run builds;
 serve for runtime verification when needed (terminate after evidence);
 E2E when appropriate; check language-server diagnostics when relevant;
@@ -21,29 +26,6 @@ pre-existing / environmental / flaky / unavailable / not run / coverage
 gap); re-run only plausibly flaky failures, never deterministic compile,
 configuration, missing-file, or missing-module failures; never present
 unexecuted tests as passing.
-
-## Required output (numbered)
-
-1. Change scope
-2. Instruction sources reviewed
-3. Required validation rules
-4. Recommended capabilities
-5. Capabilities used
-6. Tests created or modified
-7. Validation strategy
-8. Commands executed
-9. Build results
-10. Serve/runtime verification
-11. Test results
-12. Lint results
-13. Type-check results
-14. E2E results
-15. Failure classification
-16. Coverage gaps
-17. Regression risks
-18. Production changes required
-19. Compliance status
-20. Readiness: PASS / PASS_WITH_GAPS / FAIL / BLOCKED
 
 ## Failure behavior
 

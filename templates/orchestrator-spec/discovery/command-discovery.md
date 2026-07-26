@@ -1,7 +1,9 @@
 # Project Command Discovery
 
-The manager dynamically discovers repository commands every run. Inspect the
-files that exist (skip absent ones):
+The manager discovers repository commands once it knows what validation the
+task actually needs, and reads only those sources — not every config on every
+run. The list below is reference for locating a command, not a checklist to
+walk:
 
 package.json (scripts, packageManager), angular.json, workspace.json,
 project.json, nx.json, turbo.json, vite.config.*, webpack.config.*,

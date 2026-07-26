@@ -5,6 +5,7 @@
   ~/.codex -- everything runs against a scratch directory.
 #>
 
+$ErrorActionPreference = "Stop"
 $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $Install = Join-Path $RepoRoot "install.ps1"
 $Scratch = Join-Path $env:TEMP ("orch-smoke-" + [guid]::NewGuid().ToString("N"))
@@ -30,83 +31,91 @@ function Test-NoMcpLeak {
     Test-Pass "$Label`: no mcp__ leakage"
 }
 
+function Get-Python {
+    $py = (Get-Command python -ErrorAction SilentlyContinue).Source
+    if (-not $py) { $py = (Get-Command python3 -ErrorAction SilentlyContinue).Source }
+    return $py
+}
+
+# The install's standing invariants live in orchestrator-spec/verify-install.py
+# -- one executable list, shared with /orchestrate-update. What stays here is
+# what only a FRESH install can assert: the shipped default values, which the
+# user (or /orchestrate-update) is free to change afterwards.
 function Test-Json {
     param([string]$File, [string]$Label)
     try {
         $d = Get-Content -Raw $File | ConvertFrom-Json
-        if ($d.capabilities.explicitDeny.Count -ne 0) { throw "explicitDeny not empty" }
-        if ($d.defaultGlobalAgent -ne $false) { throw "defaultGlobalAgent not false" }
-        if ($d.workflow.maximumParallelWorkers -ne 4) { throw "maximumParallelWorkers != 4" }
-        if ($d.workflow.maximumCorrectionCycles -ne 2) { throw "maximumCorrectionCycles != 2" }
-        if ($d.workflow.maximumAgentRetries -ne 0) { throw "maximumAgentRetries != 0" }
+        if ($d.capabilities.explicitDeny.Count -ne 0) { throw "deny list should ship empty" }
         if ($d.workflow.waitSliceSeconds -ne 60) { throw "waitSliceSeconds != 60" }
         if ($d.workflow.agentTimeoutSeconds.codebaseResearcher -ne 180) { throw "researcher timeout != 180" }
-        if ($d.workflow.agentTimeoutSeconds.implementationWorker -ne 600) { throw "worker timeout != 600" }
+        if ($d.workflow.agentTimeoutSeconds.implementationWorker -ne 900) { throw "worker timeout != 900" }
         if ($d.workflow.agentTimeoutSeconds.testValidator -ne 300) { throw "validator timeout != 300" }
         if ($d.workflow.agentTimeoutSeconds.resultJudge -ne 180) { throw "judge timeout != 180" }
         if ($d.workflow.agentTimeoutSeconds.correctionWorker -ne 300) { throw "correction timeout != 300" }
         if ($d.workflow.requireIndependentJudge -ne $false) { throw "requireIndependentJudge not false" }
-        if ($d.permissions.allowBypassPermissions -ne $false) { throw "allowBypassPermissions not false" }
-        if (-not ($d.instructionGovernance.PSObject.Properties.Name -contains "followInstructionHierarchy")) { throw "followInstructionHierarchy missing" }
-        if (-not ($d.instructionGovernance.PSObject.Properties.Name -contains "inspectNestedInstructionFiles")) { throw "inspectNestedInstructionFiles missing" }
-        if ($d.instructionGovernance.PSObject.Properties.Name -contains "followClaudeMdHierarchy") { throw "old field name followClaudeMdHierarchy still present" }
-        Test-Pass "$Label`: orchestration.json valid + invariants hold"
+        # Pruned in schema 2: they were all-true restatements of the prompt prose.
+        if ($d.PSObject.Properties.Name -contains "instructionGovernance") { throw "instructionGovernance should be pruned" }
+        if ($d.PSObject.Properties.Name -contains "capabilityRouting") { throw "capabilityRouting should be pruned" }
+        Test-Pass "$Label`: orchestration.json ships the documented defaults"
     } catch {
         Test-Fail "$Label`: orchestration.json check failed: $_"
     }
 }
 
-function Test-Toml {
+function Test-Verify {
     param([string]$Dir, [string]$Label)
-    $py = (Get-Command python -ErrorAction SilentlyContinue).Source
-    if (-not $py) { $py = (Get-Command python3 -ErrorAction SilentlyContinue).Source }
-    if (-not $py) { Test-Pass "$Label`: TOML check skipped (no python on PATH)"; return }
-    $pyScript = @'
-import sys, glob
-try:
-    import tomllib
-except ImportError:
-    print("tomllib unavailable (py<3.11) -- skipping strict parse", file=sys.stderr)
-    sys.exit(0)
-d = sys.argv[1]
-expect = {
-    "codebase-researcher.toml": "read-only",
-    "result-judge.toml": "read-only",
-    "implementation-worker.toml": "workspace-write",
-    "test-validator.toml": "workspace-write",
-}
-for f in glob.glob(d + "/agents/*.toml"):
-    p = tomllib.loads(open(f, "rb").read().decode("utf-8"))
-    name = f.replace("\\", "/").split("/")[-1]
-    assert "name" in p and "description" in p and "developer_instructions" in p
-    assert p.get("sandbox_mode") == expect[name], (name, p.get("sandbox_mode"))
-    assert p.get("mcp_servers") == {}, name
-'@
-    $tmp = Join-Path $env:TEMP ("orch-tomlcheck-" + [guid]::NewGuid().ToString("N") + ".py")
-    [System.IO.File]::WriteAllText($tmp, $pyScript)
-    $err = & $py $tmp ($Dir.Replace('\\','/')) 2>&1
+    $py = Get-Python
+    if (-not $py) { Test-Fail "$Label`: no python on PATH -- verify-install.py cannot run"; return }
+    $out = & $py (Join-Path $RepoRoot "templates\orchestrator-spec\verify-install.py") $Dir
     if ($LASTEXITCODE -eq 0) {
-        Test-Pass "$Label`: all .toml files parse + sandbox_mode correct"
+        Test-Pass "$Label`: verify-install.py clean"
     } else {
-        Test-Fail "$Label`: TOML check failed: $err"
+        Test-Fail "$Label`: verify-install.py: $out"
     }
-    Remove-Item $tmp -ErrorAction SilentlyContinue
 }
 
-function Test-ManagerNoFrontmatter {
-    param([string]$File, [string]$Label)
-    $first = Get-Content $File -TotalCount 1
-    if ($first -eq "---") {
-        Test-Fail "$Label`: task-orchestrator.md unexpectedly has frontmatter"
+# Proves verify-install.py would fail if the install were broken. Without this
+# a green verify only means it did not complain.
+function Test-VerifyNegative {
+    param([string]$Dir, [string]$Label)
+    $py = Get-Python
+    if (-not $py) { Test-Fail "$Label`: no python on PATH -- negative cases cannot run"; return }
+    $out = & $py (Join-Path $RepoRoot "tests\verify-install-negative.py") $Dir
+    if ($LASTEXITCODE -eq 0) {
+        Test-Pass "$Label`: verify-install.py rejects every corrupted variant"
     } else {
-        Test-Pass "$Label`: task-orchestrator.md has no frontmatter (correct)"
+        Test-Fail "$Label`: verify-install negative cases: $out"
+    }
+}
+
+function Test-WorkerModel {
+    # The worker authors production code; a weak default is paid back in
+    # correction cycles, so pin the rendered default.
+    param([string]$File, [string]$Label)
+    $line = (Get-Content $File | Where-Object { $_ -like "model:*" } | Select-Object -First 1)
+    if ($line -match "sonnet") {
+        Test-Pass "$Label`: worker renders model: sonnet (default)"
+    } else {
+        Test-Fail "$Label`: worker model is not sonnet: $line"
+    }
+}
+
+function Test-Drift {
+    $py = Get-Python
+    if (-not $py) { Test-Fail "drift check cannot run: no python on PATH"; return }
+    $out = & $py (Join-Path $RepoRoot "tests\check-drift.py")
+    if ($LASTEXITCODE -eq 0) {
+        Test-Pass "templates: structure and step references valid"
+    } else {
+        Test-Fail "templates: Claude/Codex drift: $out"
     }
 }
 
 function Invoke-Install {
-    param([string]$Platform, [string]$ProjDir, [string]$CodexConfigOverride = "")
+    param([string]$Platform, [string]$ProjDir, [string]$CodexConfigOverride = "", [string]$AllowTestWrites = "n")
     New-Item -ItemType Directory -Force -Path $ProjDir | Out-Null
     $env:ORCH_NONINTERACTIVE = "1"
+    $env:ORCH_ALLOW_TEST_WRITES = $AllowTestWrites
     $env:ORCH_PLATFORM = $Platform
     $env:ORCH_SCOPE = "project"
     $env:ORCH_PROJECT_DIR = $ProjDir
@@ -117,17 +126,23 @@ function Invoke-Install {
     return $LASTEXITCODE
 }
 
-Write-Host "=== 1/6: claude-only ==="
+Write-Host "=== 0/7: template drift (Claude vs Codex) ==="
+Test-Drift
+
+Write-Host "=== 1/7: claude-only ==="
 $proj = Join-Path $Scratch "claude-only"
 if ((Invoke-Install "claude" $proj) -eq 0) {
     Test-Pass "claude-only: install.ps1 exited 0"
     Test-NoTokens (Join-Path $proj ".claude") "claude-only"
     Test-Json (Join-Path $proj ".claude\orchestration.json") "claude-only"
+    Test-Verify (Join-Path $proj ".claude") "claude-only"
+    Test-VerifyNegative (Join-Path $proj ".claude") "claude-only"
+    Test-WorkerModel (Join-Path $proj ".claude\agents\implementation-worker.md") "claude-only"
 } else {
     Test-Fail "claude-only: install.ps1 failed"
 }
 
-Write-Host "=== 2/6: codex-only ==="
+Write-Host "=== 2/7: codex-only ==="
 $proj = Join-Path $Scratch "codex-only"
 $cfg = Join-Path $proj ".codex\config.toml"
 if ((Invoke-Install "codex" $proj $cfg) -eq 0) {
@@ -135,18 +150,13 @@ if ((Invoke-Install "codex" $proj $cfg) -eq 0) {
     Test-NoTokens (Join-Path $proj ".codex") "codex-only"
     Test-NoMcpLeak (Join-Path $proj ".codex") "codex-only"
     Test-Json (Join-Path $proj ".codex\orchestration.json") "codex-only"
-    Test-Toml (Join-Path $proj ".codex") "codex-only"
-    Test-ManagerNoFrontmatter (Join-Path $proj ".codex\agents\task-orchestrator.md") "codex-only"
-    if (Test-Path (Join-Path $proj ".codex\agents\task-orchestrator.toml")) {
-        Test-Fail "codex-only: task-orchestrator.toml should not exist"
-    } else {
-        Test-Pass "codex-only: no task-orchestrator.toml (correct)"
-    }
+    Test-Verify (Join-Path $proj ".codex") "codex-only"
+    Test-VerifyNegative (Join-Path $proj ".codex") "codex-only"
 } else {
     Test-Fail "codex-only: install.ps1 failed"
 }
 
-Write-Host "=== 3/6: both ==="
+Write-Host "=== 3/7: both ==="
 $proj = Join-Path $Scratch "both"
 $cfg = Join-Path $proj ".codex\config.toml"
 if ((Invoke-Install "both" $proj $cfg) -eq 0) {
@@ -158,7 +168,7 @@ if ((Invoke-Install "both" $proj $cfg) -eq 0) {
     Test-Fail "both: install.ps1 failed"
 }
 
-Write-Host "=== 4/6: config.toml -- absent (created) ==="
+Write-Host "=== 4/7: config.toml -- absent (created) ==="
 $cfg = Join-Path $Scratch "cfg-absent\config.toml"
 $proj = Join-Path $Scratch "cfg-absent-proj"
 if ((Invoke-Install "codex" $proj $cfg) -eq 0) {
@@ -171,7 +181,7 @@ if ((Invoke-Install "codex" $proj $cfg) -eq 0) {
     Test-Fail "config.toml absent-case: install failed"
 }
 
-Write-Host "=== 5/6: config.toml -- present, no [agents] (appended) ==="
+Write-Host "=== 5/7: config.toml -- present, no [agents] (appended) ==="
 $cfg = Join-Path $Scratch "cfg-noagents\config.toml"
 New-Item -ItemType Directory -Force -Path (Split-Path $cfg) | Out-Null
 [System.IO.File]::WriteAllText($cfg, "[other]`nfoo = `"bar`"`n")
@@ -187,7 +197,7 @@ if ((Invoke-Install "codex" $proj $cfg) -eq 0) {
     Test-Fail "config.toml no-agents-case: install failed"
 }
 
-Write-Host "=== 6/6: config.toml -- present, has [agents] (untouched, warned) ==="
+Write-Host "=== 6/7: config.toml -- present, has [agents] (untouched, warned) ==="
 $cfg = Join-Path $Scratch "cfg-hasagents\config.toml"
 New-Item -ItemType Directory -Force -Path (Split-Path $cfg) | Out-Null
 [System.IO.File]::WriteAllText($cfg, "[agents]`nmax_concurrent_threads_per_session = 8`n")
@@ -205,8 +215,25 @@ if ((Invoke-Install "codex" $proj $cfg) -eq 0) {
     Test-Fail "config.toml has-agents-case: install failed"
 }
 
+Write-Host "=== 7/7: test writes enabled -- validator gains Edit/Write ==="
+$proj = Join-Path $Scratch "testwrites-on"
+if ((Invoke-Install "claude" $proj "" "y") -eq 0) {
+    Test-Pass "test-writes-on: install.ps1 exited 0"
+    Test-NoTokens (Join-Path $proj ".claude") "test-writes-on"
+    # verify-install.py ties the validator's Edit/Write allowlist to
+    # validator.allowTestWrites, so this covers the "with" case too.
+    Test-Verify (Join-Path $proj ".claude") "test-writes-on"
+    if ((Get-Content -Raw (Join-Path $proj ".claude\orchestration.json")) -match '"allowTestWrites": true') {
+        Test-Pass "test-writes-on: orchestration.json records allowTestWrites=true"
+    } else {
+        Test-Fail "test-writes-on: orchestration.json still has allowTestWrites=false"
+    }
+} else {
+    Test-Fail "test-writes-on: install.ps1 failed"
+}
+
 Remove-Item -Recurse -Force $Scratch -ErrorAction SilentlyContinue
-Remove-Item Env:\ORCH_NONINTERACTIVE, Env:\ORCH_PLATFORM, Env:\ORCH_SCOPE, Env:\ORCH_PROJECT_DIR, Env:\ORCH_CODEX_CONFIG_PATH_OVERRIDE -ErrorAction SilentlyContinue
+Remove-Item Env:\ORCH_NONINTERACTIVE, Env:\ORCH_PLATFORM, Env:\ORCH_SCOPE, Env:\ORCH_PROJECT_DIR, Env:\ORCH_CODEX_CONFIG_PATH_OVERRIDE, Env:\ORCH_ALLOW_TEST_WRITES -ErrorAction SilentlyContinue
 
 Write-Host ""
 Write-Host "================================================"

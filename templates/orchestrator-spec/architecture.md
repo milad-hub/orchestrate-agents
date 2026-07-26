@@ -6,25 +6,26 @@
 |---|---|---|---|---|---|
 | Manager | task-orchestrator | opus | high | source + tests | yes (only agent that may) |
 | Researcher | codebase-researcher | haiku | medium | none | no |
-| Worker | implementation-worker | haiku | medium | assigned source + tests | no |
+| Worker | implementation-worker | sonnet | medium | assigned source + tests | no |
 | Validator | test-validator | haiku | medium | tests/fixtures/snapshots only | no |
 | Judge | result-judge | sonnet | high | none | no |
 
 ## Flow
 
 1. User task arrives (via `/orchestrate <task>` or `claude --agent task-orchestrator`).
-2. Manager reads `{{AGENT_HOME_DIR}}/orchestration.json`, discovers capabilities
-   (discovery/capability-discovery.md), instructions
-   (instructions/instruction-file-discovery.md), and project commands
-   (discovery/project-analysis.md).
-3. Manager defines measurable acceptance criteria and classifies the task
-   (trivial / moderate / complex). Trivial work is done directly — delegation
-   only when useful.
+2. Manager reads `{{AGENT_HOME_DIR}}/orchestration.json`, then classifies the
+   task (trivial / moderate / complex) before spending anything on discovery.
+3. Scaled to that class, the manager discovers instructions
+   (instructions/instruction-file-discovery.md), capabilities
+   (discovery/capability-discovery.md), and the project commands the planned
+   validation needs (discovery/project-analysis.md), then defines measurable
+   acceptance criteria. Trivial work is done directly — delegation only when
+   useful.
 4. Researchers run first (read-only, parallelizable freely). Workers run
    after research, parallel only for **disjoint file scopes**. Validator runs
-   after workers. Judge runs last, independently.
+   after workers when independent validation is useful. Judge runs last.
 5. Manager reviews every result directly against repository evidence.
-6. Judge issues APPROVE / APPROVE_WITH_NOTES / REJECT.
+6. Judge issues APPROVE / APPROVE_WITH_NOTES / REJECT / INCONCLUSIVE.
 7. On REJECT: correction loop (policies/correction-loop.md), max 2 cycles.
 8. Manager returns one consolidated final response.
 
@@ -55,7 +56,8 @@ integration. The judge never edits and never accepts self-reported success.
 
 Discovery happens at the start of **every** run from the live session, never
 from stale lists. See discovery/ and policies/capability-routing.md. Task
-packets carry RECOMMENDED CAPABILITIES and PROHIBITED CAPABILITIES sections.
+packets name capability recommendations and prohibitions only when they
+materially affect the task; both sections are omitted when empty.
 
 ## Worktree integration
 
