@@ -41,13 +41,32 @@ before anything is reported done.
 
 ## Install
 
+```powershell
+irm https://raw.githubusercontent.com/milad-hub/orchestrate-agents/main/bootstrap.ps1 | iex
+```
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/milad-hub/orchestrate-agents/main/bootstrap.sh | bash
+```
+
+The bootstrap downloads this branch's archive to a temp directory, runs the
+installer from it, and deletes the directory afterwards — the installer needs
+the whole `templates/` tree, so a single remote file cannot do the job alone.
+
+Before it writes anything, the installer checks this machine for `git`,
+`python3` (3.7+) and the CLI for the platform you picked, and tells you what
+would break if one is missing.
+
+### Install from a clone
+
+The reviewable path — a one-liner runs remote code unreviewed with your
+permissions, while a clone leaves it on disk to read first:
+
 ```bash
 git clone https://github.com/milad-hub/orchestrate-agents.git
 cd orchestrate-agents
 ./install.sh
 ```
-
-or, on Windows:
 
 ```powershell
 git clone https://github.com/milad-hub/orchestrate-agents.git
@@ -55,12 +74,8 @@ cd orchestrate-agents
 .\install.ps1
 ```
 
-Downloading the ZIP works too — the installer only reads `templates/`
-and never calls `git` on itself.
-
-Before it writes anything, the installer checks this machine for `git`,
-`python3` (3.7+) and the CLI for the platform you picked, and tells you
-what would break if one is missing.
+Downloading the ZIP works too — the installer only reads `templates/` and
+never calls `git` on itself.
 
 You'll be asked:
 1. **Platform** — Claude Code, Codex CLI, or Both.
@@ -249,6 +264,17 @@ behaves exactly as before until you pick a profile.
 .\install.ps1 -Uninstall
 ```
 
+Without a clone — note the scriptblock form on PowerShell, since a piped
+script cannot take parameters:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/milad-hub/orchestrate-agents/main/bootstrap.sh | bash -s -- --uninstall
+```
+
+```powershell
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/milad-hub/orchestrate-agents/main/bootstrap.ps1))) -Uninstall
+```
+
 Same two questions — platform and scope — then it lists every path it is
 about to delete and asks once before deleting anything.
 
@@ -327,6 +353,9 @@ directory/directories you installed it into.
 
 ```
 install.sh / install.ps1   — installers, and --uninstall / -Uninstall
+bootstrap.sh / .ps1        — no-clone entry points: fetch the branch
+                              archive to a temp dir, run the installer
+                              from it, delete it again
 tests/                     — smoke suites (bash + PowerShell) and the
                               config-UI test; they install into a
                               throwaway directory and verify the result

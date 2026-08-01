@@ -125,10 +125,10 @@ run_install() {
   return $?
 }
 
-echo "=== 0/11: template drift (Claude vs Codex) ==="
+echo "=== 0/12: template drift (Claude vs Codex) ==="
 check_drift
 
-echo "=== 1/11: claude-only ==="
+echo "=== 1/12: claude-only ==="
 PROJ="$SCRATCH/claude-only"
 if run_install claude "$PROJ" ORCH_ALLOW_TEST_WRITES=n; then
   pass "claude-only: install.sh exited 0"
@@ -141,7 +141,7 @@ else
   fail "claude-only: install.sh failed: $(cat /tmp/smoke_install_out)"
 fi
 
-echo "=== 2/11: codex-only ==="
+echo "=== 2/12: codex-only ==="
 PROJ="$SCRATCH/codex-only"
 if ORCH_CODEX_CONFIG_PATH_OVERRIDE="$PROJ/.codex/config.toml" run_install codex "$PROJ"; then
   pass "codex-only: install.sh exited 0"
@@ -154,7 +154,7 @@ else
   fail "codex-only: install.sh failed: $(cat /tmp/smoke_install_out)"
 fi
 
-echo "=== 3/11: both ==="
+echo "=== 3/12: both ==="
 PROJ="$SCRATCH/both"
 if ORCH_CODEX_CONFIG_PATH_OVERRIDE="$PROJ/.codex/config.toml" run_install both "$PROJ"; then
   pass "both: install.sh exited 0"
@@ -165,7 +165,7 @@ else
   fail "both: install.sh failed: $(cat /tmp/smoke_install_out)"
 fi
 
-echo "=== 4/11: config.toml -- absent (created) ==="
+echo "=== 4/12: config.toml -- absent (created) ==="
 CFG="$SCRATCH/cfg-absent/config.toml"
 PROJ="$SCRATCH/cfg-absent-proj"
 if ORCH_CODEX_CONFIG_PATH_OVERRIDE="$CFG" run_install codex "$PROJ"; then
@@ -178,7 +178,7 @@ else
   fail "config.toml absent-case: install failed"
 fi
 
-echo "=== 5/11: config.toml -- present, no [agents] (appended) ==="
+echo "=== 5/12: config.toml -- present, no [agents] (appended) ==="
 CFG="$SCRATCH/cfg-noagents/config.toml"
 mkdir -p "$(dirname "$CFG")"
 printf '[other]\nfoo = "bar"\n' > "$CFG"
@@ -193,7 +193,7 @@ else
   fail "config.toml no-agents-case: install failed"
 fi
 
-echo "=== 6/11: config.toml -- has [agents], value is fine (untouched, quiet) ==="
+echo "=== 6/12: config.toml -- has [agents], value is fine (untouched, quiet) ==="
 CFG="$SCRATCH/cfg-hasagents/config.toml"
 mkdir -p "$(dirname "$CFG")"
 printf '[agents]\nmax_concurrent_threads_per_session = 8\n' > "$CFG"
@@ -212,7 +212,7 @@ else
   fail "config.toml has-agents-case: install failed"
 fi
 
-echo "=== 7/11: config.toml -- [agents] value too low (specific warning) ==="
+echo "=== 7/12: config.toml -- [agents] value too low (specific warning) ==="
 CFG="$SCRATCH/cfg-lowagents/config.toml"
 mkdir -p "$(dirname "$CFG")"
 printf '[agents]\nmax_concurrent_threads_per_session = 2\n' > "$CFG"
@@ -231,7 +231,7 @@ else
   fail "config.toml low-agents-case: install failed"
 fi
 
-echo "=== 8/11: test writes enabled -- validator gains Edit/Write ==="
+echo "=== 8/12: test writes enabled -- validator gains Edit/Write ==="
 PROJ="$SCRATCH/testwrites-on"
 if run_install claude "$PROJ" ORCH_ALLOW_TEST_WRITES=y; then
   pass "test-writes-on: install.sh exited 0"
@@ -252,7 +252,7 @@ fi
 # session transcripts, credentials and plugin trees. The verifier must read
 # only this bundle's files -- every other case installs project-scoped, which
 # is exactly why an earlier whole-root scan went unnoticed.
-echo "=== 9/11: global scope -- verifier must not read the rest of HOME ==="
+echo "=== 9/12: global scope -- verifier must not read the rest of HOME ==="
 FAKEHOME="$SCRATCH/fakehome"
 DECOY="sk-decoy-DEADBEEF0123456789"
 if env ORCH_NONINTERACTIVE=1 ORCH_PLATFORM=claude ORCH_SCOPE=global \
@@ -299,7 +299,7 @@ else
   fail "global: install.sh failed: $(cat /tmp/smoke_install_out)"
 fi
 
-echo "=== 10/11: uninstall -- bundle gone, user's own files kept ==="
+echo "=== 10/12: uninstall -- bundle gone, user's own files kept ==="
 PROJ="$SCRATCH/uninstall"
 if ORCH_CODEX_CONFIG_PATH_OVERRIDE="$PROJ/.codex/config.toml" run_install both "$PROJ"; then
   # Decoys: the failure this case exists for is an uninstall that takes the
@@ -329,7 +329,7 @@ else
   fail "uninstall: setup install failed: $(cat /tmp/smoke_install_out)"
 fi
 
-echo "=== 11/11: config UI -- fanned-out writes keep the install verifiable ==="
+echo "=== 11/12: config UI -- fanned-out writes keep the install verifiable ==="
 PROJ="$SCRATCH/config-ui"
 if ORCH_CODEX_CONFIG_PATH_OVERRIDE="$PROJ/.codex/config.toml" run_install both "$PROJ"; then
   if "$PY" "$REPO_ROOT/tests/config-ui-test.py" \
@@ -340,6 +340,36 @@ if ORCH_CODEX_CONFIG_PATH_OVERRIDE="$PROJ/.codex/config.toml" run_install both "
   fi
 else
   fail "config UI: setup install failed: $(cat /tmp/smoke_install_out)"
+fi
+
+echo "=== 12/12: bootstrap.sh -- install without cloning ==="
+PROJ="$SCRATCH/bootstrap"
+mkdir -p "$PROJ"
+# The bundle as it is right now, not as it was committed: a working-tree
+# tarball is what the remote archive will be after the next push.
+TARBALL="$SCRATCH/bundle.tar.gz"
+if tar -czf "$TARBALL" -C "$(dirname "$REPO_ROOT")"      --exclude=.git --exclude=.smoke-test "$(basename "$REPO_ROOT")" 2>/dev/null; then
+  # Own TMPDIR, so "did the bootstrap clean up after itself" is answerable.
+  BOOT_TMP="$SCRATCH/boot-tmp"
+  mkdir -p "$BOOT_TMP"
+  if env ORCH_ARCHIVE_URL="$TARBALL" TMPDIR="$BOOT_TMP" ORCH_NONINTERACTIVE=1        ORCH_PLATFORM=claude ORCH_SCOPE=project ORCH_PROJECT_DIR="$PROJ"        ORCH_OVERWRITE=y bash "$REPO_ROOT/bootstrap.sh"        >/tmp/smoke_bootstrap_out 2>&1; then
+    pass "bootstrap: bootstrap.sh exited 0"
+    if [ -f "$PROJ/.claude/agents/task-orchestrator.md" ]; then
+      pass "bootstrap: installed from the archive, no clone"
+    else
+      fail "bootstrap: nothing installed: $(tail -3 /tmp/smoke_bootstrap_out)"
+    fi
+    check_verify "$PROJ/.claude" "bootstrap"
+    if [ -z "$(ls -A "$BOOT_TMP" 2>/dev/null)" ]; then
+      pass "bootstrap: temp directory removed"
+    else
+      fail "bootstrap: left $(ls -A "$BOOT_TMP" | head -1) behind in TMPDIR"
+    fi
+  else
+    fail "bootstrap: bootstrap.sh failed: $(tail -3 /tmp/smoke_bootstrap_out)"
+  fi
+else
+  fail "bootstrap: could not build the test tarball"
 fi
 
 echo ""

@@ -133,10 +133,10 @@ function Invoke-Install {
     return $LASTEXITCODE
 }
 
-Write-Host "=== 0/11: template drift (Claude vs Codex) ==="
+Write-Host "=== 0/12: template drift (Claude vs Codex) ==="
 Test-Drift
 
-Write-Host "=== 1/11: claude-only ==="
+Write-Host "=== 1/12: claude-only ==="
 $proj = Join-Path $Scratch "claude-only"
 if ((Invoke-Install "claude" $proj) -eq 0) {
     Test-Pass "claude-only: install.ps1 exited 0"
@@ -149,7 +149,7 @@ if ((Invoke-Install "claude" $proj) -eq 0) {
     Test-Fail "claude-only: install.ps1 failed"
 }
 
-Write-Host "=== 2/11: codex-only ==="
+Write-Host "=== 2/12: codex-only ==="
 $proj = Join-Path $Scratch "codex-only"
 $cfg = Join-Path $proj ".codex\config.toml"
 if ((Invoke-Install "codex" $proj $cfg) -eq 0) {
@@ -163,7 +163,7 @@ if ((Invoke-Install "codex" $proj $cfg) -eq 0) {
     Test-Fail "codex-only: install.ps1 failed"
 }
 
-Write-Host "=== 3/11: both ==="
+Write-Host "=== 3/12: both ==="
 $proj = Join-Path $Scratch "both"
 $cfg = Join-Path $proj ".codex\config.toml"
 if ((Invoke-Install "both" $proj $cfg) -eq 0) {
@@ -175,7 +175,7 @@ if ((Invoke-Install "both" $proj $cfg) -eq 0) {
     Test-Fail "both: install.ps1 failed"
 }
 
-Write-Host "=== 4/11: config.toml -- absent (created) ==="
+Write-Host "=== 4/12: config.toml -- absent (created) ==="
 $cfg = Join-Path $Scratch "cfg-absent\config.toml"
 $proj = Join-Path $Scratch "cfg-absent-proj"
 if ((Invoke-Install "codex" $proj $cfg) -eq 0) {
@@ -188,7 +188,7 @@ if ((Invoke-Install "codex" $proj $cfg) -eq 0) {
     Test-Fail "config.toml absent-case: install failed"
 }
 
-Write-Host "=== 5/11: config.toml -- present, no [agents] (appended) ==="
+Write-Host "=== 5/12: config.toml -- present, no [agents] (appended) ==="
 $cfg = Join-Path $Scratch "cfg-noagents\config.toml"
 New-Item -ItemType Directory -Force -Path (Split-Path $cfg) | Out-Null
 [System.IO.File]::WriteAllText($cfg, "[other]`nfoo = `"bar`"`n")
@@ -204,7 +204,7 @@ if ((Invoke-Install "codex" $proj $cfg) -eq 0) {
     Test-Fail "config.toml no-agents-case: install failed"
 }
 
-Write-Host "=== 6/11: config.toml -- has [agents], value is fine (untouched, quiet) ==="
+Write-Host "=== 6/12: config.toml -- has [agents], value is fine (untouched, quiet) ==="
 $cfg = Join-Path $Scratch "cfg-hasagents\config.toml"
 New-Item -ItemType Directory -Force -Path (Split-Path $cfg) | Out-Null
 [System.IO.File]::WriteAllText($cfg, "[agents]`nmax_concurrent_threads_per_session = 8`n")
@@ -224,7 +224,7 @@ if ((Invoke-Install "codex" $proj $cfg) -eq 0) {
     Test-Fail "config.toml has-agents-case: install failed"
 }
 
-Write-Host "=== 7/11: config.toml -- [agents] value too low (specific warning) ==="
+Write-Host "=== 7/12: config.toml -- [agents] value too low (specific warning) ==="
 $cfg = Join-Path $Scratch "cfg-lowagents\config.toml"
 New-Item -ItemType Directory -Force -Path (Split-Path $cfg) | Out-Null
 [System.IO.File]::WriteAllText($cfg, "[agents]`nmax_concurrent_threads_per_session = 2`n")
@@ -244,7 +244,7 @@ if ((Invoke-Install "codex" $proj $cfg) -eq 0) {
     Test-Fail "config.toml low-agents-case: install failed"
 }
 
-Write-Host "=== 8/11: test writes enabled -- validator gains Edit/Write ==="
+Write-Host "=== 8/12: test writes enabled -- validator gains Edit/Write ==="
 $proj = Join-Path $Scratch "testwrites-on"
 if ((Invoke-Install "claude" $proj "" "y") -eq 0) {
     Test-Pass "test-writes-on: install.ps1 exited 0"
@@ -265,7 +265,7 @@ if ((Invoke-Install "claude" $proj "" "y") -eq 0) {
 # session transcripts, credentials and plugin trees. The verifier must read
 # only this bundle's files -- every other case installs project-scoped, which
 # is exactly why an earlier whole-root scan went unnoticed.
-Write-Host "=== 9/11: global scope -- verifier must not read the rest of HOME ==="
+Write-Host "=== 9/12: global scope -- verifier must not read the rest of HOME ==="
 $fakeHome = Join-Path $Scratch "fakehome"
 $decoy = "sk-decoy-DEADBEEF0123456789"
 $savedHome = $env:USERPROFILE
@@ -324,7 +324,7 @@ if ($installRc -eq 0) {
     Test-Fail "global: install.ps1 failed"
 }
 
-Write-Host "=== 10/11: uninstall -- bundle gone, user's own files kept ==="
+Write-Host "=== 10/12: uninstall -- bundle gone, user's own files kept ==="
 $proj = Join-Path $Scratch "uninstall"
 if ((Invoke-Install "both" $proj (Join-Path $proj ".codex\config.toml")) -eq 0) {
     # Decoys: the failure this case exists for is an uninstall that takes the
@@ -354,7 +354,7 @@ if ((Invoke-Install "both" $proj (Join-Path $proj ".codex\config.toml")) -eq 0) 
     Test-Fail "uninstall: setup install failed"
 }
 
-Write-Host "=== 11/11: config UI -- fanned-out writes keep the install verifiable ==="
+Write-Host "=== 11/12: config UI -- fanned-out writes keep the install verifiable ==="
 $proj = Join-Path $Scratch "config-ui"
 if ((Invoke-Install "both" $proj (Join-Path $proj ".codex\config.toml")) -eq 0) {
     $py = Get-Python
@@ -371,6 +371,51 @@ if ((Invoke-Install "both" $proj (Join-Path $proj ".codex\config.toml")) -eq 0) 
     }
 } else {
     Test-Fail "config UI: setup install failed"
+}
+
+Write-Host "=== 12/12: bootstrap.ps1 -- install without cloning ==="
+$proj = Join-Path $Scratch "bootstrap"
+New-Item -ItemType Directory -Force -Path $proj | Out-Null
+# The bundle as it is right now, not as it was committed: a working-tree zip
+# is what the remote archive will be after the next push.
+$stage = Join-Path $Scratch "stage\orchestrate-agents"
+New-Item -ItemType Directory -Force -Path $stage | Out-Null
+Get-ChildItem -Path $RepoRoot -Force |
+    Where-Object { $_.Name -notin @(".git", ".smoke-test") } |
+    ForEach-Object { Copy-Item $_.FullName -Destination $stage -Recurse -Force }
+$zip = Join-Path $Scratch "bundle.zip"
+Compress-Archive -Path $stage -DestinationPath $zip -Force
+# Own TEMP, so "did the bootstrap clean up after itself" is answerable.
+$bootTmp = Join-Path $Scratch "boot-tmp"
+New-Item -ItemType Directory -Force -Path $bootTmp | Out-Null
+$oldTemp = $env:TEMP
+$env:ORCH_ARCHIVE_URL = $zip
+$env:ORCH_NONINTERACTIVE = "1"
+$env:ORCH_PLATFORM = "claude"
+$env:ORCH_SCOPE = "project"
+$env:ORCH_PROJECT_DIR = $proj
+$env:TEMP = $bootTmp
+$bootOut = & powershell -NoProfile -ExecutionPolicy Bypass `
+    -File (Join-Path $RepoRoot "bootstrap.ps1") 2>&1
+$bootCode = $LASTEXITCODE
+$env:TEMP = $oldTemp
+Remove-Item Env:\ORCH_ARCHIVE_URL -ErrorAction SilentlyContinue
+if ($bootCode -eq 0) {
+    Test-Pass "bootstrap: bootstrap.ps1 exited 0"
+    if (Test-Path (Join-Path (Join-Path (Join-Path $proj ".claude") "agents") "task-orchestrator.md")) {
+        Test-Pass "bootstrap: installed from the archive, no clone"
+    } else {
+        Test-Fail "bootstrap: nothing installed: $($bootOut | Select-Object -Last 3)"
+    }
+    Test-Verify (Join-Path $proj ".claude") "bootstrap"
+    $left = Get-ChildItem -Path $bootTmp -Force -ErrorAction SilentlyContinue
+    if (-not $left) {
+        Test-Pass "bootstrap: temp directory removed"
+    } else {
+        Test-Fail "bootstrap: left $($left[0].Name) behind in TEMP"
+    }
+} else {
+    Test-Fail "bootstrap: bootstrap.ps1 failed: $($bootOut | Select-Object -Last 3)"
 }
 
 Remove-Item -Recurse -Force $Scratch -ErrorAction SilentlyContinue
