@@ -4,3 +4,10 @@
 *.md text
 *.json text
 *.toml text eol=lf
+
+# Language stats. This bundle is prompts -- markdown, which linguist skips as
+# prose -- so the six helper scripts (the verifier, the settings UI, the test
+# harness) were the only thing left to count and the repo badged itself
+# "Python". They are support code, not what anyone installs or runs; the
+# installers are, and those are shell and PowerShell.
+*.py linguist-detectable=false
