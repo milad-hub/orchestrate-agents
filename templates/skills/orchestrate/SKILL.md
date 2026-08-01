@@ -45,7 +45,9 @@ here.
   first of `python3`, `python`, `py -3` that runs. If it fails, report what
   it names and ask whether to continue or run `/orchestrate-sync` first —
   a delegate that silently lost a tool is cheaper to catch here than three
-  steps into a workflow. Skip the check if no Python is available.
+  steps into a workflow. Once per session is enough: nothing between two
+  `/orchestrate` runs in the same session moves what it checks, so skip it
+  if you already ran it here. Skip it too if no Python is available.
 - If `{{CLAUDE_DIR}}/agents/task-orchestrator.md` or the delegate agent types
   are unavailable, report that the orchestration system is not installed
   correctly and point to {{CLAUDE_DIR}}/README-orchestration.md — do not

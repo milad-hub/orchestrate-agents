@@ -2,7 +2,8 @@
 # Installer for the orchestrate-agents bundle (manager/researcher/worker/
 # validator/judge multi-agent system) -- Claude Code and/or Codex CLI.
 #
-# Usage: ./install.sh
+# Usage: ./install.sh            install
+#        ./install.sh --uninstall  remove what this bundle installed
 #
 # Non-interactive testing (never used for a real install -- for smoke tests
 # only): set ORCH_NONINTERACTIVE=1 and optionally override any of:
@@ -10,6 +11,10 @@
 #   ORCH_SCOPE=global|project
 #   ORCH_PROJECT_DIR=<path>              (required if ORCH_SCOPE=project)
 #   ORCH_OVERWRITE=y|n
+#   ORCH_UNINSTALL_CONFIRM=y|n           (--uninstall only)
+#
+# The config UI is only ever offered interactively -- a non-interactive run
+# never starts a server, because nothing would be there to stop it.
 #   ORCH_CODEX_CONFIG_PATH_OVERRIDE=<path>  (test-only; overrides
 #                                             ~/.codex/config.toml target)
 #
@@ -23,6 +28,25 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TEMPLATES="$REPO_ROOT/templates"
+
+# Skill directories this bundle shipped under a previous name. copy_tree only
+# writes files, so without this a rename leaves the old skill installed
+# alongside the new one -- both register, and the stale copy describes a
+# procedure that no longer matches the verifier it calls. Uninstall removes
+# them too, or a rename would strand a directory nothing can clean up.
+RETIRED_SKILLS="orchestrate-update"
+
+UNINSTALL=false
+VERB="Install"
+for arg in "$@"; do
+  case "$arg" in
+    --uninstall) UNINSTALL=true; VERB="Uninstall" ;;
+    # Stop at the first non-comment line, so the help never has to be kept
+    # in sync with a line number.
+    -h|--help) sed -n '2,$p' "${BASH_SOURCE[0]}" | sed -n '/^[^#]/q;p' | sed 's/^# \{0,1\}//'; exit 0 ;;
+    *) echo "Error: unknown argument '$arg' (expected --uninstall)." >&2; exit 1 ;;
+  esac
+done
 
 # ---- prompting helpers -----------------------------------------------
 
@@ -163,12 +187,122 @@ prompt_bool() {
   if [ "$idx" = "0" ]; then printf 'true'; else printf 'false'; fi
 }
 
+# python is optional for the bundle itself, so everything needing it
+# degrades to a message rather than failing. The version gate is not
+# decoration: `python` on PATH is still Python 2 on plenty of machines, it
+# passes a bare `import sys`, and config-ui.py then dies on `http.server`.
+find_python() {
+  local candidate
+  for candidate in python3 python; do
+    if command -v "$candidate" >/dev/null 2>&1 &&
+       "$candidate" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 7) else 1)' >/dev/null 2>&1; then
+      command -v "$candidate"
+      return 0
+    fi
+  done
+  return 1
+}
+
+# ---- 0. preflight --------------------------------------------------------
+
+# Everything the installed system needs from this machine, checked before a
+# single file is written. Each of these fails later otherwise -- git at the
+# first worktree spawn, python at the first verify run -- with a
+# half-configured install already on disk explaining nothing.
+missing_deps=""
+
+check_dep() {
+  # $1 = label, $2 = command, $3 = what breaks without it
+  if command -v "$2" >/dev/null 2>&1; then
+    printf '  %-8s %s\n' "$1" "$("$2" --version 2>&1 | head -n1)"
+    return 0
+  fi
+  printf '  %-8s MISSING -- %s\n' "$1" "$3"
+  missing_deps="$missing_deps $1"
+  return 1
+}
+
+# Missing but continuing is a choice, not a silent default. Non-interactive
+# runs continue: the smoke tests install on machines without either CLI.
+confirm_missing() {
+  [ -n "$missing_deps" ] || return 0
+  echo ""
+  if [ "${ORCH_NONINTERACTIVE:-0}" = "1" ]; then
+    echo "Missing:$missing_deps -- continuing (non-interactive)."
+    missing_deps=""
+    return 0
+  fi
+  if [ "$(radio_select "Missing:$missing_deps. Continue anyway? (Up/Down move, Enter confirm):" 1 \
+      "Yes, install anyway" "No, stop here")" != "0" ]; then
+    echo "Nothing was written."
+    exit 1
+  fi
+  missing_deps=""
+}
+
+if ! $UNINSTALL; then
+  echo "Checking this machine:"
+  check_dep git git "workers run in git worktrees; parallel work cannot be isolated" || true
+  py_found="$(find_python || true)"
+  if [ -n "$py_found" ]; then
+    printf '  %-8s %s (%s)\n' python "$("$py_found" --version 2>&1 | head -n1)" "$py_found"
+  else
+    printf '  %-8s MISSING -- %s\n' python \
+      "no python 3.7+ on PATH; verify-install.py and the settings UI need it, and /orchestrate-sync would fall back to checking by hand"
+    missing_deps="$missing_deps python"
+  fi
+  confirm_missing
+  echo ""
+fi
+
+# ---- 0. already installed? ----------------------------------------------
+
+# Both the global targets and this directory's, because a project-scoped
+# install is invisible from $HOME and running the installer inside it again
+# is the normal way to reach it.
+EXISTING_DIRS=()
+for candidate_dir in "$HOME/.claude" "$HOME/.codex" "$PWD/.claude" "$PWD/.codex"; do
+  if [ -f "$candidate_dir/agents/task-orchestrator.md" ]; then
+    already_listed=false
+    if [ ${#EXISTING_DIRS[@]} -gt 0 ]; then
+      for seen in "${EXISTING_DIRS[@]}"; do
+        if [ "$seen" = "$candidate_dir" ]; then already_listed=true; fi
+      done
+    fi
+    if ! $already_listed; then EXISTING_DIRS+=("$candidate_dir"); fi
+  fi
+done
+
+if [ "${ORCH_NONINTERACTIVE:-0}" != "1" ] && ! $UNINSTALL &&
+   [ ${#EXISTING_DIRS[@]} -gt 0 ]; then
+  echo "Orchestrate is already installed:"
+  for seen in "${EXISTING_DIRS[@]}"; do echo "  $seen"; done
+  echo ""
+  menu_idx="$(radio_select "What next? (Up/Down move, Enter confirm):" 0 \
+    "Reinstall or upgrade (keeps your orchestration.json)" \
+    "Open the settings UI" \
+    "Uninstall")"
+  case "$menu_idx" in
+    1)
+      PY_BIN="$(find_python || true)"
+      if [ -z "$PY_BIN" ]; then
+        echo "The settings UI needs python3, which is not on PATH." >&2
+        exit 1
+      fi
+      # config-ui.py finds the sibling target itself, so either copy shows
+      # both tabs.
+      exec "$PY_BIN" "${EXISTING_DIRS[0]}/orchestrator-spec/config-ui.py"
+      ;;
+    2) UNINSTALL=true; VERB="Uninstall" ;;
+  esac
+fi
+
 # ---- 1. platform choice -------------------------------------------------
 
 if [ "${ORCH_NONINTERACTIVE:-0}" = "1" ]; then
   platform_ans="${ORCH_PLATFORM:-claude}"
 else
-  result="$(checkbox_select "Install for: (Up/Down move, Space toggle, Enter confirm)" "1 0" "Claude Code" "Codex CLI")"
+  result="$(checkbox_select "$VERB for: (Up/Down move, Space toggle, Enter confirm)" "1 0" "Claude Code" "Codex CLI")"
   read -r sel_claude_n sel_codex_n <<< "$result"
   sel_claude=false
   sel_codex=false
@@ -193,6 +327,18 @@ if [ "$platform_ans" = "claude" ] || [ "$platform_ans" = "both" ]; then WANT_CLA
 if [ "$platform_ans" = "codex" ] || [ "$platform_ans" = "both" ]; then WANT_CODEX=true; fi
 echo "Platform(s): $platform_ans"
 
+# The CLI for the platform being installed into -- checked here rather than
+# above, because which one matters is only known once the platform is chosen.
+if ! $UNINSTALL; then
+  if $WANT_CLAUDE; then
+    check_dep claude claude "nothing would run the installed agents; install Claude Code first" || true
+  fi
+  if $WANT_CODEX; then
+    check_dep codex codex "nothing would run the installed agents; install the Codex CLI first" || true
+  fi
+  confirm_missing
+fi
+
 # ---- 2. scope ----------------------------------------------------------
 
 if [ "${ORCH_NONINTERACTIVE:-0}" = "1" ]; then
@@ -208,7 +354,14 @@ else
   if $WANT_CODEX; then
     if [ -n "$project_dirs" ]; then project_dirs="$project_dirs, .codex/"; else project_dirs=".codex/"; fi
   fi
-  scope_idx="$(radio_select "Install scope (Up/Down move, Enter confirm):" 0 "Install globally ($global_dirs)" "Install into a project ($project_dirs)")"
+  if $UNINSTALL; then
+    scope_g="Uninstall from global ($global_dirs)"
+    scope_p="Uninstall from a project ($project_dirs)"
+  else
+    scope_g="Install globally ($global_dirs)"
+    scope_p="Install into a project ($project_dirs)"
+  fi
+  scope_idx="$(radio_select "$VERB scope (Up/Down move, Enter confirm):" 0 "$scope_g" "$scope_p")"
   if [ "$scope_idx" = "1" ]; then scope_ans="project"; else scope_ans="global"; fi
 fi
 
@@ -230,6 +383,73 @@ fi
 
 if $WANT_CLAUDE; then echo "Claude Code target: $TARGET_CLAUDE_DIR"; fi
 if $WANT_CODEX; then echo "Codex CLI target: $TARGET_CODEX_DIR"; fi
+
+# ---- 2b. uninstall ------------------------------------------------------
+
+# Only what this bundle installed, named one entry at a time. A global install
+# lives in ~/.claude, which also holds the user's own agents and skills, their
+# session transcripts and their credentials -- removing the directory would
+# take all of that with it. The names come from the template tree, so a file
+# added to the bundle is removable without touching this list.
+REMOVE_LIST=()
+add_bundle_entries() {
+  # $3 is this platform's skill tree, not the Claude one: the two trees are
+  # free to diverge, and enumerating the wrong one leaves a skill installed
+  # that uninstall claims to have removed.
+  local dir="$1" src="$2" skill_src="$3" f name
+  for f in "$src"/*; do
+    [ -e "$f" ] || continue
+    REMOVE_LIST+=("$dir/agents/$(basename "$f")")
+  done
+  for f in "$skill_src"/*/; do
+    [ -d "$f" ] || continue
+    REMOVE_LIST+=("$dir/skills/$(basename "${f%/}")")
+  done
+  for name in $RETIRED_SKILLS; do
+    REMOVE_LIST+=("$dir/skills/$name")
+  done
+  REMOVE_LIST+=("$dir/orchestrator-spec" "$dir/README-orchestration.md" \
+                "$dir/orchestration.json")
+}
+
+if $UNINSTALL; then
+  if $WANT_CLAUDE; then
+    add_bundle_entries "$TARGET_CLAUDE_DIR" "$TEMPLATES/agents" "$TEMPLATES/skills"
+  fi
+  if $WANT_CODEX; then
+    add_bundle_entries "$TARGET_CODEX_DIR" "$TEMPLATES/codex/agents" \
+                       "$TEMPLATES/codex/skills"
+  fi
+  present=()
+  for p in "${REMOVE_LIST[@]}"; do
+    [ -e "$p" ] && present+=("$p")
+  done
+  if [ ${#present[@]} -eq 0 ]; then
+    echo ""
+    echo "Nothing to uninstall -- no bundle files found there."
+    exit 0
+  fi
+  echo ""
+  echo "These will be removed:"
+  for p in "${present[@]}"; do echo "  $p"; done
+  echo ""
+  echo "Left alone: your own agents and skills, and the [agents] table in"
+  echo "~/.codex/config.toml -- other agents may rely on it."
+  if [ "$(prompt_bool ORCH_UNINSTALL_CONFIRM "Remove them" n)" != "true" ]; then
+    echo "Aborted -- nothing was changed."
+    exit 0
+  fi
+  for p in "${present[@]}"; do rm -rf "$p"; done
+  # An agents/ or skills/ we just emptied is litter. One holding anything else
+  # is the user's, and rmdir refuses it -- which is the check.
+  for d in "$TARGET_CLAUDE_DIR" "$TARGET_CODEX_DIR"; do
+    rmdir "$d/agents" "$d/skills" 2>/dev/null || true
+    rmdir "$d" 2>/dev/null || true
+  done
+  echo ""
+  echo "Uninstalled ${#present[@]} item(s)."
+  exit 0
+fi
 
 # ---- 3. overwrite check -------------------------------------------------
 
@@ -317,7 +537,10 @@ substitute() {
 
 copy_tree() {
   local src_root="$1" dst_root="$2" f rel dst
-  find "$src_root" -type f | while IFS= read -r f; do
+  # -prune on __pycache__: a stray bytecode dir in the source tree is not
+  # part of the bundle and must not reach the install.
+  find "$src_root" -name __pycache__ -type d -prune -o -type f -print \
+    | while IFS= read -r f; do
     rel="${f#"$src_root"/}"
     dst="$dst_root/$rel"
     mkdir -p "$(dirname "$dst")"
@@ -328,7 +551,12 @@ copy_tree() {
 # ---- 6. config.toml [agents] merge (Codex only, always global) --------
 
 # Must be >= workflow.maximumParallelWorkers in orchestration.template.json.
-REQUIRED_THREADS=4
+# 8, not 4: this is a ceiling, not a plan -- Codex only ever runs what the
+# manager asks for. workflow.maximumParallelWorkers accepts up to 8 (the
+# Exhaustive profile already sets 6), and a cap below it makes Codex silently
+# run fewer subagents than the manager scheduled. Sized to the largest
+# fan-out anything here can select.
+REQUIRED_THREADS=8
 
 # The value of max_concurrent_threads_per_session inside the [agents] table,
 # or empty if the table has no such key. Scoped to that table so an identically
@@ -373,12 +601,6 @@ merge_codex_config() {
 
 BUNDLE_VERSION=7
 KEPT_CONFIG=""
-
-# Skill directories this bundle shipped under a previous name. copy_tree only
-# writes files, so without this a rename leaves the old skill installed
-# alongside the new one -- both register, and the stale copy describes a
-# procedure that no longer matches the verifier it calls.
-RETIRED_SKILLS="orchestrate-update"
 
 remove_retired_skills() {
   local dir="$1" name
@@ -463,9 +685,28 @@ if [ -n "$KEPT_CONFIG" ]; then
   echo "flags, capability deny list). Tool allowlists and MCP routing were"
   echo "reset to the bundle defaults."
 fi
+# ---- 8. config UI -------------------------------------------------------
+
+if $WANT_CLAUDE; then UI_DIR="$TARGET_CLAUDE_DIR"; else UI_DIR="$TARGET_CODEX_DIR"; fi
+UI_SCRIPT="$UI_DIR/orchestrator-spec/config-ui.py"
+PY_BIN="$(find_python || true)"
+
 echo ""
 echo "Next: open a session and run /orchestrate-sync -- once per platform you"
 echo "installed. It reconciles tool allowlists, MCP routing and the capability"
 echo "deny list against THIS machine, and records the prompt hashes it checks"
 echo "against later. Recommended before your first real /orchestrate run; the"
 echo "bundle works without it, just conservatively."
+
+if [ -n "$PY_BIN" ]; then
+  echo ""
+  echo "To review or change these settings in a browser, any time:"
+  echo "  $PY_BIN \"$UI_SCRIPT\""
+  # Only interactively: the server runs until Ctrl-C, so a scripted install
+  # that answered yes would simply never finish.
+  if [ "${ORCH_NONINTERACTIVE:-0}" != "1" ] &&
+     [ "$(prompt_bool ORCH_OPEN_UI "Open it now" y)" = "true" ]; then
+    echo ""
+    exec "$PY_BIN" "$UI_SCRIPT"
+  fi
+fi

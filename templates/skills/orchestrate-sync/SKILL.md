@@ -17,22 +17,21 @@ until all three have failed.
 
 ### 0. Fast path
 
-Most runs find nothing. Establish that cheaply before spending anything.
+Most runs find nothing. Establish that cheaply before spending anything, and
+let the verifier do the ordering -- it migrates before it checks, and records
+the prompt hashes before anything can edit them.
 
-1. Read `orchestrator-spec/install-state.json` -- `platform`,
-   `bundleVersion`, `cliVersion`, `lastCheckedAt`. Compare `cliVersion`
-   against `claude --version`. A `null` means this is the first run since
-   install, so take the full path once.
-2. If `orchestrator-spec/prompt-hashes.json` is absent, create it now, before
-   any edit in this run: `PY {{CLAUDE_DIR}}/orchestrator-spec/verify-install.py
-   --bless {{CLAUDE_DIR}}`. It records a hash of each role's prompt body so
-   later runs can prove the bodies were not reworded. Blessing first thing
-   matters -- blessing after an edit would bake that edit into the baseline.
-3. If the version matches and this session's own skill, agent-type and
-   `mcp__*` tool listings show nothing that the delegates' `tools:`
-   allowlists and `capabilities.explicitDeny` do not already account for, go
-   straight to step 4, report "no drift", and stop. Those listings are
-   already in context; reading them costs nothing.
+1. Run, with the version string `claude --version` prints:
+   `PY {{CLAUDE_DIR}}/orchestrator-spec/verify-install.py --sync-start {{CLAUDE_DIR}} --cli-version "<version>"`
+   It migrates an older config, records the prompt-body hashes if this is the
+   first run, verifies the install, and prints one `NEXT:` line.
+2. Obey that line. `NEXT: FAST-PATH` means nothing can have moved: skip to
+   step 4, report no drift, stop. `NEXT: STOP` means fix what it listed
+   before doing anything else -- never by editing a prompt body to make a
+   check pass. Only `NEXT: FULL-PASS` continues into steps 1-3.
+3. If none of `python3`, `python`, `py -3` runs, do the same work by hand:
+   read `install-state.json`, compare `cliVersion`, and treat a missing
+   `orchestrator-spec/prompt-hashes.json` as a first run.
 
 Steps 1-3 below are for the case where something actually moved.
 
@@ -85,8 +84,8 @@ content that hasn't drifted.
   `orchestrator-spec/orchestration.template.json` is the installer's build
   input, not live config -- leave it alone.
 - Update the excluded-capabilities and version/date lines in
-  `README-orchestration.md`, and write what you saw back into
-  `install-state.json` (`cliVersion`, `lastCheckedAt`).
+  `README-orchestration.md`. Leave `install-state.json` alone -- step 4
+  writes it, and only if the install verifies.
 - If a previously-unsupported frontmatter field is now confirmed supported
   (or vice versa), update `generation-plan.md`'s version-support notes AND
   the relevant agent file(s) -- but only add a field if it demonstrably
@@ -143,18 +142,18 @@ content that hasn't drifted.
 
 ### 4. Validate
 
-1. Run the shipped verifier:
-   `PY {{CLAUDE_DIR}}/orchestrator-spec/verify-install.py {{CLAUDE_DIR}}`
-   It checks the JSON policy invariants, that the fanned-out permission flags
-   agree with each other, three-way model/effort agreement (frontmatter <->
-   `orchestration.json` <-> the README configuration table), delegate tool
-   allowlists, each role's mandatory prompt blocks, the blessed prompt-body
-   hashes, leftover installer tokens and credential-shaped strings -- across
-   this bundle's own files only. Fix what it names and re-run until it exits
-   0. Do not restate its checks here -- that file is the list, and a prose
-   copy is what goes stale.
-2. If none of `python3`, `python`, `py -3` runs, work through the same list
-   by hand by reading `verify-install.py`.
+1. Run `PY {{CLAUDE_DIR}}/orchestrator-spec/verify-install.py --sync-finish
+   {{CLAUDE_DIR}} --cli-version "<version>"`. It re-runs every check and,
+   only if they all pass, records `cliVersion` and `lastCheckedAt` for you --
+   so a run that ends broken cannot leave a state file claiming it succeeded.
+   Fix what it names and re-run until it prints `NEXT: DONE`.
+2. What it checks is in `verify-install.py`: JSON policy invariants, the
+   fanned-out permission flags agreeing, delegate tool allowlists, three-way
+   model/effort agreement, each role's mandatory prompt blocks, the blessed
+   prompt-body hashes, leftover installer tokens and credential-shaped
+   strings -- across this bundle's own files only. That file is the list; a
+   prose copy here is what goes stale. Without Python, work through it by
+   reading that file.
 3. Confirm the `orchestrate` and `orchestrate-sync` skills still appear in
    this session's skill listing with valid frontmatter. The verifier reads
    files; only the session can see the live registry.

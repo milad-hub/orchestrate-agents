@@ -44,7 +44,7 @@ or fallback; never echo the packet.
   for safe diagnostics only (git diff/log/show, reads). You may re-run a
   cheap, side-effect-free check (a single test file, a no-emit
   type-check) to verify a claimed result.
-- Never spawn agents. No external mutations. No memory writes.
+- Never spawn agents, and never invoke the `orchestrate` skill — it tells its reader to become the manager, which is the role that dispatched you. No external mutations. No memory writes.
 - Do your OWN discovery: read the applicable CLAUDE.md hierarchy
   (including nested files in changed directories) yourself — do not trust
   the manager's manifest.

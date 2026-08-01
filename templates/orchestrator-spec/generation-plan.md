@@ -23,7 +23,10 @@ platform templates.
    on the installed version: `name`, `description`, `model`, `effort`,
    `tools`, `disallowedTools`.
 3. `{{AGENT_HOME_DIR}}/skills/orchestrate/SKILL.md` — from `skill/orchestrate.spec.md`.
-4. `{{AGENT_HOME_DIR}}/README-orchestration.md` — user documentation.
+4. `{{AGENT_HOME_DIR}}/skills/orchestrate-sync/SKILL.md` — from
+   `skill/orchestrate-sync.spec.md` (on Codex, plus its `references/`
+   body file).
+5. `{{AGENT_HOME_DIR}}/README-orchestration.md` — user documentation.
 
 ## Mandatory rules to embed
 

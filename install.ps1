@@ -5,7 +5,8 @@
   validator/judge multi-agent system) -- Claude Code and/or Codex CLI.
 
 .DESCRIPTION
-  Run with no arguments for the interactive installer.
+  Run with no arguments for the interactive installer. Run with -Uninstall to
+  remove what this bundle installed (and nothing else).
 
   Non-interactive testing (never used for a real install -- for smoke tests
   only): set $env:ORCH_NONINTERACTIVE = "1" and optionally override any of:
@@ -13,6 +14,10 @@
     ORCH_SCOPE=global|project
     ORCH_PROJECT_DIR=<path>              (required if ORCH_SCOPE=project)
     ORCH_OVERWRITE=y|n
+    ORCH_UNINSTALL_CONFIRM=y|n           (-Uninstall only)
+
+  The config UI is only ever offered interactively -- a non-interactive run
+  never starts a server, because nothing would be there to stop it.
     ORCH_CODEX_CONFIG_PATH_OVERRIDE=<path>  (test-only; overrides
                                               ~/.codex/config.toml target)
 
@@ -23,11 +28,21 @@
     ORCH_ALLOW_BUILD_SERVE=y|n           (default n)
 #>
 
+param([switch]$Uninstall)
+
 $ErrorActionPreference = "Stop"
 
 $RepoRoot = $PSScriptRoot
 $Templates = Join-Path $RepoRoot "templates"
 $NonInteractive = ($env:ORCH_NONINTERACTIVE -eq "1")
+$Verb = if ($Uninstall) { "Uninstall" } else { "Install" }
+
+# Skill directories this bundle shipped under a previous name. Copy-Tree only
+# writes files, so without this a rename leaves the old skill installed
+# alongside the new one -- both register, and the stale copy describes a
+# procedure that no longer matches the verifier it calls. Uninstall removes
+# them too, or a rename would strand a directory nothing can clean up.
+$RetiredSkills = @("orchestrate-update")
 
 function Get-Prompt {
     param([string]$EnvVar, [string]$Text, [string]$Default)
@@ -53,16 +68,34 @@ function Format-Clipped {
     return $Text.Substring(0, $Width)
 }
 
+# Rewind for the next redraw. Hosts disagree about what the console reports --
+# a scrolled buffer leaves fewer rows above the cursor than were written, and
+# some hosts have no addressable cursor at all -- so clamp the target row and
+# report failure instead of throwing. $false means "draw below instead".
+function Move-CursorUp {
+    param([int]$Rows)
+    try {
+        $top = [Console]::CursorTop - $Rows
+        if ($top -lt 0) { $top = 0 }
+        [Console]::SetCursorPosition(0, $top)
+        return $true
+    } catch {
+        return $false
+    }
+}
+
 function Get-Radio {
     param([string[]]$Options, [int]$DefaultIndex, [string]$Prompt)
     $cursor = $DefaultIndex
     $menuLines = $Options.Length + 2
     $width = Get-ClipWidth
-    Write-Host (Format-Clipped $Prompt $width)
-    for ($i = 0; $i -lt $Options.Length; $i++) { Write-Host "" }
-    Write-Host ""
+    $first = $true
     while ($true) {
-        [Console]::SetCursorPosition(0, [Console]::CursorTop - $menuLines)
+        if ($first) {
+            $first = $false
+        } elseif (-not (Move-CursorUp $menuLines)) {
+            Write-Host ""
+        }
         Write-Host (Format-Clipped $Prompt $width)
         for ($i = 0; $i -lt $Options.Length; $i++) {
             $mark = if ($i -eq $cursor) { "x" } else { " " }
@@ -94,6 +127,124 @@ function Get-PromptBool {
     if ($idx -eq 0) { return "true" } else { return "false" }
 }
 
+# python is optional for the bundle itself, so everything needing it degrades
+# to a message rather than failing. The version gate is not decoration:
+# `python` on PATH is still Python 2 on plenty of machines, it passes a bare
+# `import sys`, and config-ui.py then dies on `http.server`.
+function Find-Python {
+    foreach ($candidate in @("python3", "python", "py")) {
+        $cmd = Get-Command $candidate -ErrorAction SilentlyContinue
+        if ($cmd) {
+            try {
+                & $cmd.Source -c "import sys; sys.exit(0 if sys.version_info >= (3, 7) else 1)" 2>$null | Out-Null
+                if ($LASTEXITCODE -eq 0) { return $cmd.Source }
+            } catch {}
+        }
+    }
+    return $null
+}
+
+# ---- 0. preflight -----------------------------------------------------------
+
+# Everything the installed system needs from this machine, checked before a
+# single file is written. Each of these fails later otherwise -- git at the
+# first worktree spawn, python at the first verify run -- with a
+# half-configured install already on disk explaining nothing.
+$MissingDeps = @()
+
+function Test-Dep {
+    param([string]$Label, [string]$Command, [string]$Breaks)
+    $cmd = Get-Command $Command -ErrorAction SilentlyContinue
+    if ($cmd) {
+        $v = (& $cmd.Source --version 2>&1 | Select-Object -First 1)
+        Write-Host ("  {0,-8} {1}" -f $Label, $v)
+        return
+    }
+    Write-Host ("  {0,-8} MISSING -- {1}" -f $Label, $Breaks)
+    $script:MissingDeps += $Label
+}
+
+# Missing but continuing is a choice, not a silent default. Non-interactive
+# runs continue: the smoke tests install on machines without either CLI.
+function Confirm-Missing {
+    if ($script:MissingDeps.Count -eq 0) { return }
+    $list = ($script:MissingDeps -join " ")
+    Write-Host ""
+    if ($NonInteractive) {
+        Write-Host "Missing: $list -- continuing (non-interactive)."
+        $script:MissingDeps = @()
+        return
+    }
+    $idx = Get-Radio -Options @("Yes, install anyway", "No, stop here") -DefaultIndex 1 `
+        -Prompt "Missing: $list. Continue anyway? (Up/Down move, Enter confirm):"
+    if ($idx -ne 0) {
+        Write-Host "Nothing was written."
+        exit 1
+    }
+    $script:MissingDeps = @()
+}
+
+if (-not $Uninstall) {
+    Write-Host "Checking this machine:"
+    Test-Dep -Label "git" -Command "git" `
+        -Breaks "workers run in git worktrees; parallel work cannot be isolated"
+    $pyFound = Find-Python
+    if ($pyFound) {
+        $pv = (& $pyFound --version 2>&1 | Select-Object -First 1)
+        Write-Host ("  {0,-8} {1} ({2})" -f "python", $pv, $pyFound)
+    } else {
+        Write-Host ("  {0,-8} MISSING -- {1}" -f "python",
+            "no python 3.7+ on PATH; verify-install.py and the settings UI need it, and /orchestrate-sync would fall back to checking by hand")
+        $MissingDeps += "python"
+    }
+    Confirm-Missing
+    Write-Host ""
+}
+
+# ---- 0. already installed? --------------------------------------------------
+
+# Both the global targets and this directory's, because a project-scoped
+# install is invisible from the home directory and running the installer
+# inside it again is the normal way to reach it.
+$homeDir = $env:USERPROFILE
+if ([string]::IsNullOrEmpty($homeDir)) {
+    $homeDir = [Environment]::GetFolderPath('UserProfile')
+}
+$ExistingDirs = @()
+foreach ($candidateDir in @((Join-Path $homeDir ".claude"),
+                            (Join-Path $homeDir ".codex"),
+                            (Join-Path (Get-Location) ".claude"),
+                            (Join-Path (Get-Location) ".codex"))) {
+    if ((Test-Path (Join-Path $candidateDir "agents\task-orchestrator.md")) -and
+        ($ExistingDirs -notcontains $candidateDir)) {
+        $ExistingDirs += $candidateDir
+    }
+}
+
+if (-not $NonInteractive -and -not $Uninstall -and $ExistingDirs.Count -gt 0) {
+    Write-Host "Orchestrate is already installed:"
+    foreach ($seen in $ExistingDirs) { Write-Host "  $seen" }
+    Write-Host ""
+    $menuIdx = Get-Radio -Options @(
+        "Reinstall or upgrade (keeps your orchestration.json)",
+        "Open the settings UI",
+        "Uninstall") -DefaultIndex 0 -Prompt "What next? (Up/Down move, Enter confirm):"
+    if ($menuIdx -eq 1) {
+        $pyBin = Find-Python
+        if (-not $pyBin) {
+            Write-Error "The settings UI needs python3, which is not on PATH."
+            exit 1
+        }
+        # config-ui.py finds the sibling target itself, so either copy shows
+        # both tabs.
+        & $pyBin (Join-Path $ExistingDirs[0] "orchestrator-spec\config-ui.py")
+        exit $LASTEXITCODE
+    } elseif ($menuIdx -eq 2) {
+        $Uninstall = $true
+        $Verb = "Uninstall"
+    }
+}
+
 # ---- 1. platform choice ---------------------------------------------------
 
 if ($NonInteractive) {
@@ -103,12 +254,14 @@ if ($NonInteractive) {
     $checked = @($true, $false)
     $cursor = 0
     $menuLines = $options.Length + 2
-    Write-Host "Install for: (Up/Down move, Space toggle, Enter confirm)"
-    for ($i = 0; $i -lt $options.Length; $i++) { Write-Host "" }
-    Write-Host ""
+    $first = $true
     while ($true) {
-        [Console]::SetCursorPosition(0, [Console]::CursorTop - $menuLines)
-        Write-Host "Install for: (Up/Down move, Space toggle, Enter confirm)"
+        if ($first) {
+            $first = $false
+        } elseif (-not (Move-CursorUp $menuLines)) {
+            Write-Host ""
+        }
+        Write-Host "$Verb for: (Up/Down move, Space toggle, Enter confirm)"
         for ($i = 0; $i -lt $options.Length; $i++) {
             $box = if ($checked[$i]) { "x" } else { " " }
             $pointer = if ($i -eq $cursor) { ">" } else { " " }
@@ -134,6 +287,20 @@ $WantClaude = ($platformAns -eq "claude" -or $platformAns -eq "both")
 $WantCodex = ($platformAns -eq "codex" -or $platformAns -eq "both")
 Write-Host "Platform(s): $platformAns"
 
+# The CLI for the platform being installed into -- checked here rather than
+# above, because which one matters is only known once the platform is chosen.
+if (-not $Uninstall) {
+    if ($WantClaude) {
+        Test-Dep -Label "claude" -Command "claude" `
+            -Breaks "nothing would run the installed agents; install Claude Code first"
+    }
+    if ($WantCodex) {
+        Test-Dep -Label "codex" -Command "codex" `
+            -Breaks "nothing would run the installed agents; install the Codex CLI first"
+    }
+    Confirm-Missing
+}
+
 # ---- 2. scope --------------------------------------------------------------
 
 if ($NonInteractive) {
@@ -145,7 +312,14 @@ if ($NonInteractive) {
     $projectDirs = @()
     if ($WantClaude) { $projectDirs += ".claude/" }
     if ($WantCodex) { $projectDirs += ".codex/" }
-    $idx = Get-Radio -Options @("Install globally ($($globalDirs -join ', '))", "Install into a project ($($projectDirs -join ', '))") -DefaultIndex 0 -Prompt "Install scope (Up/Down move, Enter confirm):"
+    if ($Uninstall) {
+        $scopeG = "Uninstall from global ($($globalDirs -join ', '))"
+        $scopeP = "Uninstall from a project ($($projectDirs -join ', '))"
+    } else {
+        $scopeG = "Install globally ($($globalDirs -join ', '))"
+        $scopeP = "Install into a project ($($projectDirs -join ', '))"
+    }
+    $idx = Get-Radio -Options @($scopeG, $scopeP) -DefaultIndex 0 -Prompt "$Verb scope (Up/Down move, Enter confirm):"
     if ($idx -eq 1) { $scopeAns = "project" } else { $scopeAns = "global" }
 }
 
@@ -181,6 +355,75 @@ if ($scopeAns -eq "project") {
 
 if ($WantClaude) { Write-Host "Claude Code target: $TargetClaudeDir" }
 if ($WantCodex) { Write-Host "Codex CLI target: $TargetCodexDir" }
+
+# ---- 2b. uninstall ----------------------------------------------------------
+
+# Only what this bundle installed, named one entry at a time. A global install
+# lives in ~/.claude, which also holds the user's own agents and skills, their
+# session transcripts and their credentials -- removing the directory would
+# take all of that with it. The names come from the template tree, so a file
+# added to the bundle is removable without touching this list.
+function Get-BundleEntries {
+    # $SkillSrc is this platform's skill tree, not the Claude one: the two
+    # trees are free to diverge, and enumerating the wrong one leaves a skill
+    # installed that uninstall claims to have removed.
+    param([string]$Dir, [string]$AgentSrc, [string]$SkillSrc)
+    $entries = @()
+    foreach ($f in Get-ChildItem -File -Path $AgentSrc) {
+        $entries += (Join-Path $Dir "agents\$($f.Name)")
+    }
+    foreach ($d in Get-ChildItem -Directory -Path $SkillSrc) {
+        $entries += (Join-Path $Dir "skills\$($d.Name)")
+    }
+    foreach ($name in $RetiredSkills) {
+        $entries += (Join-Path $Dir "skills\$name")
+    }
+    $entries += (Join-Path $Dir "orchestrator-spec")
+    $entries += (Join-Path $Dir "README-orchestration.md")
+    $entries += (Join-Path $Dir "orchestration.json")
+    return $entries
+}
+
+if ($Uninstall) {
+    $removeList = @()
+    if ($WantClaude) {
+        $removeList += Get-BundleEntries -Dir $TargetClaudeDir -AgentSrc (Join-Path $Templates "agents") -SkillSrc (Join-Path $Templates "skills")
+    }
+    if ($WantCodex) {
+        $removeList += Get-BundleEntries -Dir $TargetCodexDir -AgentSrc (Join-Path $Templates "codex\agents") -SkillSrc (Join-Path $Templates "codex\skills")
+    }
+    $present = @($removeList | Where-Object { Test-Path -LiteralPath $_ })
+    if ($present.Count -eq 0) {
+        Write-Host ""
+        Write-Host "Nothing to uninstall - no bundle files found there."
+        exit 0
+    }
+    Write-Host ""
+    Write-Host "These will be removed:"
+    foreach ($p in $present) { Write-Host "  $p" }
+    Write-Host ""
+    Write-Host "Left alone: your own agents and skills, and the [agents] table in"
+    Write-Host "~/.codex/config.toml - other agents may rely on it."
+    if ((Get-PromptBool -EnvVar "ORCH_UNINSTALL_CONFIRM" -Text "Remove them" -Default "n") -ne "true") {
+        Write-Host "Aborted - nothing was changed."
+        exit 0
+    }
+    foreach ($p in $present) { Remove-Item -LiteralPath $p -Recurse -Force -Confirm:$false }
+    # An agents\ or skills\ we just emptied is litter. One holding anything
+    # else is the user's, and the emptiness test is what keeps it.
+    foreach ($d in @($TargetClaudeDir, $TargetCodexDir)) {
+        foreach ($sub in @("agents", "skills", "")) {
+            $path = if ($sub) { Join-Path $d $sub } else { $d }
+            if ((Test-Path -LiteralPath $path) -and
+                -not (Get-ChildItem -Force -LiteralPath $path)) {
+                Remove-Item -LiteralPath $path -Force
+            }
+        }
+    }
+    Write-Host ""
+    Write-Host "Uninstalled $($present.Count) item(s)."
+    exit 0
+}
 
 # ---- 3. overwrite check -----------------------------------------------------
 
@@ -268,7 +511,10 @@ function Copy-Substituted {
 
 function Copy-Tree {
     param([string]$SrcRoot, [string]$DstRoot, [hashtable]$TokenMap)
-    Get-ChildItem -Path $SrcRoot -Recurse -File | ForEach-Object {
+    # A stray __pycache__ in the source tree is not part of the bundle.
+    Get-ChildItem -Path $SrcRoot -Recurse -File |
+        Where-Object { $_.FullName -notmatch '[\\/]__pycache__[\\/]' } |
+        ForEach-Object {
         $rel = $_.FullName.Substring($SrcRoot.Length).TrimStart('\', '/')
         $dst = Join-Path $DstRoot $rel
         Copy-Substituted -SrcFile $_.FullName -DstFile $dst -TokenMap $TokenMap
@@ -278,7 +524,12 @@ function Copy-Tree {
 # ---- 6. config.toml [agents] merge (Codex only, always global) -------------
 
 # Must be >= workflow.maximumParallelWorkers in orchestration.template.json.
-$RequiredThreads = 4
+# 8, not 4: this is a ceiling, not a plan -- Codex only ever runs what the
+# manager asks for. workflow.maximumParallelWorkers accepts up to 8 (the
+# Exhaustive profile already sets 6), and a cap below it makes Codex silently
+# run fewer subagents than the manager scheduled. Sized to the largest
+# fan-out anything here can select.
+$RequiredThreads = 8
 
 # The value of max_concurrent_threads_per_session inside the [agents] table, or
 # $null if absent. Scoped to that table so an identically named key under
@@ -333,12 +584,6 @@ function Merge-CodexConfig {
 $BundleVersion = 7
 $script:KeptConfig = @()
 $script:RemovedSkills = @()
-
-# Skill directories this bundle shipped under a previous name. Copy-Tree only
-# writes files, so without this a rename leaves the old skill installed
-# alongside the new one -- both register, and the stale copy describes a
-# procedure that no longer matches the verifier it calls.
-$RetiredSkills = @("orchestrate-update")
 
 function Remove-RetiredSkills {
     param([string]$Dir)
@@ -429,9 +674,28 @@ if ($script:KeptConfig.Count -gt 0) {
     Write-Host "flags, capability deny list). Tool allowlists and MCP routing were"
     Write-Host "reset to the bundle defaults."
 }
+# ---- 8. config UI -----------------------------------------------------------
+
+$UiDir = if ($WantClaude) { $TargetClaudeDir } else { $TargetCodexDir }
+$UiScript = Join-Path $UiDir "orchestrator-spec\config-ui.py"
+$PyBin = Find-Python
+
 Write-Host ""
 Write-Host "Next: open a session and run /orchestrate-sync - once per platform you"
 Write-Host "installed. It reconciles tool allowlists, MCP routing and the capability"
 Write-Host "deny list against THIS machine, and records the prompt hashes it checks"
 Write-Host "against later. Recommended before your first real /orchestrate run; the"
 Write-Host "bundle works without it, just conservatively."
+
+if ($PyBin) {
+    Write-Host ""
+    Write-Host "To review or change these settings in a browser, any time:"
+    Write-Host "  $PyBin `"$UiScript`""
+    # Only interactively: the server runs until Ctrl-C, so a scripted install
+    # that answered yes would simply never finish.
+    if (-not $NonInteractive -and
+        (Get-PromptBool -EnvVar "ORCH_OPEN_UI" -Text "Open it now" -Default "y") -eq "true") {
+        Write-Host ""
+        & $PyBin $UiScript
+    }
+}

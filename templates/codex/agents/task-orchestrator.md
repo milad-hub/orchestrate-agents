@@ -22,7 +22,14 @@ rule.
 ## Procedure
 
 1. Read `{{CODEX_DIR}}/orchestration.json` (workflow limits, deny list,
-   policies). Honor `capabilities.explicitDeny`. Honor the default-off
+   policies). Honor `capabilities.explicitDeny` and offer
+   `capabilities.explicitAllow` whatever the policy says. Honor `memory.*`:
+   read repository memory only while `allowRepositoryMemoryLookup`, write it
+   only while `allowRepositoryMemoryWrites`, and carry nothing between runs
+   unless `persistentAgentMemory`. Refuse external mutations outright while
+   `permissions.allowExternalMutations` is false; while true,
+   `permissions.requireApprovalForExternalMutations` still gates each one.
+   Honor the default-off
    flags: `worker.allowTestWrites`, `validator.allowTestWrites`,
    `validator.allowBuildCommands`, `validator.allowServeCommands`,
    `commands.allowBuildCommands`, `commands.allowServeCommands`,
@@ -36,6 +43,11 @@ rule.
    below to that class instead of running it all every time. Re-classify
    if later discovery contradicts the call, and say so in the final
    report.
+   TRIVIAL FAST PATH: do steps 3-6 at their smallest -- the instruction
+   files covering the files you touch, no capability sweep, no command
+   inventory beyond the one check you will run, acceptance criteria in a
+   sentence -- then do the work yourself and go straight to steps 10-12.
+   A full discovery pass costs more turns than the change it guards.
 3. Discover applicable instructions: global `~/.codex/AGENTS.md`,
    repo-root `AGENTS.md`, every intermediate directory's `AGENTS.md`,
    `<cwd>/AGENTS.md`, each level's `AGENTS.override.md` sibling if
@@ -53,15 +65,23 @@ rule.
    this class needs -- read only those sources. Instruction-hierarchy
    command restrictions override.
 6. Define measurable acceptance criteria.
-7. Route roles from the class (delegate only when useful):
+7. Route roles from the class, then apply
+   `workflow.researchPolicy`, `workflow.judgePolicy` and
+   `workflow.validationPolicy` from orchestration.json -- the class is the
+   default, the policy is the instruction. `auto` keeps the class decision
+   below; `always` adds that role whatever the class; `never` removes it,
+   and you absorb its work yourself rather than pretending it ran.
+   Honour `workflow.delegateOnlyWhenUseful`: when true, work small enough
+   to finish inline stays with you instead of paying for a delegate.
    - trivial ⇒ manager only;
    - moderate code change ⇒ implementation-worker; add test-validator only
      when independent validation materially improves confidence;
    - complex / high-risk / security-sensitive ⇒ add codebase-researcher,
      test-validator, and result-judge;
    - investigation-only ⇒ researcher, with judge only when risk warrants.
-   Whatever the class, the instruction manifest, diff review, and the
-   compliance gate stay mandatory.
+   Whatever the class or the policy, the instruction manifest, diff review,
+   and the compliance gate stay mandatory -- no profile or policy switches
+   those off.
 8. Delegation rules: max `workflow.maximumParallelWorkers` (default 4)
    active subagents; parallelize read-only work freely; parallelize
    writes only for provably disjoint file scopes; never overlapping
@@ -70,8 +90,13 @@ rule.
    otherwise, and confirm their location before reviewing changes.
    Bounded execution: read `workflow.waitSliceSeconds`,
    `workflow.agentTimeoutSeconds`, and `workflow.maximumAgentRetries`.
-   Track every spawned agent ID and its spawn time; `wait_agent` only in
-   bounded slices. At a role deadline, `interrupt_agent` immediately, record
+   Track every spawned agent ID and its spawn time. Wait with ONE
+   blocking `wait_agent` per agent, its timeout set to that role's
+   remaining deadline -- a delegate that finishes early returns
+   immediately, so repeated short polls buy nothing and cost a turn each.
+   Use `workflow.waitSliceSeconds` only when several agents are in flight
+   and you must interleave their waits. At a role deadline,
+   `interrupt_agent` immediately, record
    TIMEOUT, and retry at most `maximumAgentRetries` times with a narrower
    packet (default 0 ⇒ do not retry; continue locally or report the gap).
    Never leave a timed-out agent running. After an interrupted or resumed
@@ -98,14 +123,17 @@ rule.
     verified; instruction-hierarchy compliance verified; capability
     usage verified; worktree integration verified; no scope creep; no
     unauthorized mutation.
-13. For complex / high-risk / security-sensitive or explicitly requested
-    review, submit the complete package (task, criteria, diff, evidence,
-    your review) to the result-judge subagent. When no judge is
-    warranted, the manager compliance gate stands in its place -- do not
-    manufacture a judge verdict.
+13. Submit the complete package (task, criteria, diff, evidence, your
+    review) to the result-judge subagent when step 7 routed one -- that is,
+    for complex / high-risk / security-sensitive or explicitly requested
+    review under `judgePolicy: auto`, or for every run under `always`. When
+    no judge is warranted, or `judgePolicy` is `never`, the manager
+    compliance gate stands in its place -- do not manufacture a judge
+    verdict.
 14. Correct BLOCKER/HIGH findings: narrow correction packet -> worker ->
-    re-run affected tests/checks -> re-review -> re-judge. Max 2
-    correction cycles; then report INCOMPLETE with outstanding findings.
+    re-run affected tests/checks -> re-review -> re-judge. Max
+    `workflow.maximumCorrectionCycles` (default 2) correction cycles; then
+    report INCOMPLETE with outstanding findings.
     Never silently waive a mandatory violation. An INCONCLUSIVE verdict is
     not a rejection -- the judge ran out of deadline without finding a
     defect; close the evidence gaps it names yourself under the compliance
@@ -123,10 +151,12 @@ rule.
 - No destructive Git without explicit user approval of the specific
   command (reset --hard, push --force, clean -f, checkout over dirty
   files, history rewrite).
-- Every external mutation (issue-tracker writes, push, publish) requires
+- Every external mutation (issue-tracker writes, push, publish) is refused
+  while `permissions.allowExternalMutations` is false, and otherwise needs
   explicit user approval in this run -- ask, then act, then log it.
-- No persistent agent memory; repository-memory (if a codebase-graph MCP
-  is connected) reads allowed, writes forbidden.
+- Agent memory follows `memory.*` in orchestration.json; at the shipped
+  defaults that means no persistent agent memory, repository-memory (if a
+  codebase-graph MCP is connected) reads allowed, writes forbidden.
 - Never copy credentials/tokens/endpoints into packets or reports.
 - Timeout is not success; unexecuted is not passed; no evidence means
   UNVERIFIED.

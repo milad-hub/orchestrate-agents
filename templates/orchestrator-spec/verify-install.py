@@ -7,11 +7,25 @@ against every test install so the list is exercised on every commit.
 
     python3 verify-install.py <install-dir>
     python3 verify-install.py --bless <install-dir>
+    python3 verify-install.py --migrate <install-dir>
+    python3 verify-install.py --sync-start <install-dir> [--cli-version V]
+    python3 verify-install.py --sync-finish <install-dir> [--cli-version V]
 
 <install-dir> is the directory holding orchestration.json, agents/ and
 orchestrator-spec/ -- i.e. ~/.claude or ~/.codex (or a project-scoped
 .claude / .codex). Platform is autodetected from the presence of
 agents/*.toml.
+
+--sync-start and --sync-finish are the mechanical halves of
+/orchestrate-sync, so the skill does not have to carry them as prose. Start
+migrates, blesses the prompt hashes if they are missing (before any edit, so a
+reworded prompt can never be blessed into the baseline), verifies, and prints
+one NEXT: line saying whether anything can have moved. Finish verifies again
+and records what the CLI reported. Both are safe to re-run.
+
+--migrate brings an orchestration.json kept from an older bundle up to the
+schema this one expects. Upgrades keep your config on purpose, so something
+has to move it forward, and neither installer can parse JSON.
 
 --bless records a SHA-256 of each role's prompt BODY in
 orchestrator-spec/prompt-hashes.json. Later runs check the bodies against it,
@@ -132,21 +146,53 @@ def check_json(root):
         if value != expected:
             fail("%s: %s is %r, expected %r" % (rel, label, value, expected))
 
-    want(d.get("schemaVersion"), 2, "schemaVersion")
-    want(d.get("defaultGlobalAgent"), False, "defaultGlobalAgent")
+    def want_bool(value, label):
+        if not isinstance(value, bool):
+            fail("%s: %s is %r, expected true or false" % (rel, label, value))
+
+    def want_range(value, low, high, label):
+        # bool is an int in Python, and `true` here would mean 1 by accident.
+        if isinstance(value, bool) or not isinstance(value, int):
+            fail("%s: %s is %r, expected a whole number" % (rel, label, value))
+        elif not low <= value <= high:
+            fail("%s: %s is %r, expected %d to %d"
+                 % (rel, label, value, low, high))
+
+    # Two kinds of check, and the difference is the point. want() pins a value
+    # that must never move: the schema this file is parsed against, and the two
+    # permission flags the whole design rests on -- delegates are held back by
+    # the harness, not by their prompts, and a bundle that lets those be
+    # flipped is not the bundle that was reviewed. Everything else is a tuning
+    # decision, so it is only checked for being sane; the config UI offers
+    # exactly the values these two functions accept.
+    schema = d.get("schemaVersion")
+    if schema in (1, 2):
+        fail("%s: schemaVersion is %s -- this bundle wants 3. Migrate it: "
+             "verify-install.py --migrate <dir>" % (rel, schema))
+    else:
+        want(schema, 3, "schemaVersion")
+    for key in ("researchPolicy", "judgePolicy", "validationPolicy"):
+        value = d.get("workflow", {}).get(key)
+        if schema not in (1, 2) and value not in ("never", "auto", "always"):
+            fail("%s: workflow.%s is %r, expected never, auto or always"
+                 % (rel, key, value))
+    want_bool(d.get("defaultGlobalAgent"), "defaultGlobalAgent")
     wf = d.get("workflow", {})
-    want(wf.get("maximumParallelWorkers"), 4, "workflow.maximumParallelWorkers")
-    want(wf.get("maximumCorrectionCycles"), 2, "workflow.maximumCorrectionCycles")
-    want(wf.get("maximumAgentRetries"), 0, "workflow.maximumAgentRetries")
+    want_range(wf.get("maximumParallelWorkers"), 1, 8,
+               "workflow.maximumParallelWorkers")
+    want_range(wf.get("maximumCorrectionCycles"), 0, 5,
+               "workflow.maximumCorrectionCycles")
+    want_range(wf.get("maximumAgentRetries"), 0, 3,
+               "workflow.maximumAgentRetries")
     perm = d.get("permissions", {})
     want(perm.get("allowBypassPermissions"), False,
          "permissions.allowBypassPermissions")
     want(perm.get("allowDestructiveGit"), False,
          "permissions.allowDestructiveGit")
     mem = d.get("memory", {})
-    want(mem.get("persistentAgentMemory"), False, "memory.persistentAgentMemory")
-    want(mem.get("allowRepositoryMemoryWrites"), False,
-         "memory.allowRepositoryMemoryWrites")
+    want_bool(mem.get("persistentAgentMemory"), "memory.persistentAgentMemory")
+    want_bool(mem.get("allowRepositoryMemoryWrites"),
+              "memory.allowRepositoryMemoryWrites")
 
     for key in ("codebaseResearcher", "implementationWorker", "testValidator",
                 "resultJudge", "correctionWorker"):
@@ -262,6 +308,82 @@ def role_files(root, is_codex):
         if os.path.isfile(path):
             out[stem] = path
     return out
+
+
+# Neither installer can parse JSON -- they are bash and PowerShell with no
+# dependencies -- and an upgrade deliberately keeps your orchestration.json.
+# So the migration lives here, where there is a parser, and the installer,
+# /orchestrate-sync and the config UI all call the same one.
+POLICY_FROM_BOOL = {
+    # The old booleans only distinguished "always" from "the manager decides".
+    "judgePolicy": ("requireIndependentJudge", "always", "auto"),
+    "validationPolicy": ("requireValidation", "always", "auto"),
+}
+# Bounded execution arrived after schemaVersion 1, so a v1 file has none of it
+# and check_json fails on every one of these. Backfilled with the values this
+# bundle ships rather than left missing: a v1 install that cannot migrate
+# cannot be verified either, and reinstalling keeps orchestration.json.
+V1_WORKFLOW_DEFAULTS = {
+    "maximumAgentRetries": 0,
+    "waitSliceSeconds": 60,
+    "agentTimeoutSeconds": {"codebaseResearcher": 180,
+                            "implementationWorker": 900,
+                            "testValidator": 300,
+                            "resultJudge": 180,
+                            "correctionWorker": 300},
+}
+# v1 carried two descriptive blocks that nothing reads any more -- every rule
+# in them now lives in a prompt. Dropped on migration so the file describes
+# what is actually enforced.
+V1_DEAD_BLOCKS = ("instructionGovernance", "capabilityRouting")
+
+
+def migrate(root):
+    """Bring orchestration.json up to the schema this bundle expects.
+
+    Idempotent: a file already at 3 is left alone and reported as such.
+    """
+    path = os.path.join(root, "orchestration.json")
+    if not os.path.isfile(path):
+        return False, "orchestration.json: missing"
+    try:
+        d = json.loads(read(path))
+    except ValueError as exc:
+        return False, "orchestration.json: does not parse: %s" % exc
+    version = d.get("schemaVersion")
+    if version == 3:
+        return True, "orchestration.json is already at schemaVersion 3"
+    if version not in (1, 2):
+        return False, ("orchestration.json: schemaVersion is %r, and only 1 "
+                       "or 2 can be migrated" % version)
+
+    wf = d.setdefault("workflow", {})
+    added = []
+    if version == 1:
+        for dead in V1_DEAD_BLOCKS:
+            if d.pop(dead, None) is not None:
+                added.append("dropped " + dead)
+        for key, value in sorted(V1_WORKFLOW_DEFAULTS.items()):
+            if key not in wf:
+                wf[key] = value
+                added.append("%s=%s" % (key, json.dumps(wf[key])))
+    for key, (old_key, when_true, when_false) in sorted(POLICY_FROM_BOOL.items()):
+        if key not in wf:
+            wf[key] = when_true if wf.get(old_key) is True else when_false
+            added.append("%s=%s" % (key, wf[key]))
+    if "researchPolicy" not in wf:
+        # Never had a boolean: the manager always decided from the class.
+        wf["researchPolicy"] = "auto"
+        added.append("researchPolicy=auto")
+    d["schemaVersion"] = 3
+
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as fh:
+        json.dump(d, fh, indent=2)
+        fh.write("\n")
+    os.replace(tmp, path)
+    return True, "Migrated orchestration.json from %d to schemaVersion 3 " \
+                 "(%s)" % (version, ", ".join(added) or "no keys needed adding")
 
 
 def bless(root, is_codex):
@@ -386,7 +508,43 @@ def toml_get(path, keys):
     return out, None
 
 
+AGENTS_LIMIT = re.compile(
+    r"^\s*\[agents\]\s*$(.*?)(?=^\s*\[|\Z)", re.M | re.S)
+LIMIT_VALUE = re.compile(
+    r"^\s*max_concurrent_threads_per_session\s*=\s*(\d+)", re.M)
+
+
+def check_codex_threads(root, cfg):
+    """Codex caps concurrent subagents in config.toml, and the manager plans
+    its fan-out from orchestration.json. A profile that raises
+    maximumParallelWorkers above that cap does not fail loudly -- Codex just
+    runs fewer delegates than the manager scheduled -- so check it here.
+
+    The file is global even for a project-scoped install, hence the fallback.
+    """
+    want = cfg.get("workflow", {}).get("maximumParallelWorkers")
+    if not isinstance(want, int) or isinstance(want, bool):
+        return
+    for path in (os.path.join(root, "config.toml"),
+                 os.path.expanduser(os.path.join("~", ".codex", "config.toml"))):
+        if not os.path.isfile(path):
+            continue
+        try:
+            text = read(path)
+        except (UnicodeDecodeError, OSError):
+            return
+        table = AGENTS_LIMIT.search(text)
+        value = LIMIT_VALUE.search(table.group(1)) if table else None
+        if value and int(value.group(1)) < want:
+            fail("config.toml: [agents] max_concurrent_threads_per_session is "
+                 "%s, below workflow.maximumParallelWorkers (%d) -- the "
+                 "manager would plan more subagents than Codex will run"
+                 % (value.group(1), want))
+        return
+
+
 def check_codex(root, cfg, rows):
+    check_codex_threads(root, cfg)
     manager = os.path.join(root, "agents", "task-orchestrator.md")
     if not os.path.isfile(manager):
         fail("agents/task-orchestrator.md: missing")
@@ -441,6 +599,102 @@ def check_codex(root, cfg, rows):
             fail("%s: reasoning effort is not recorded anywhere" % stem)
 
 
+# ---------------------------------------------------------------- sync ----
+
+def read_state(root):
+    path = os.path.join(root, "orchestrator-spec", "install-state.json")
+    if not os.path.isfile(path):
+        return {}
+    try:
+        return json.loads(read(path))
+    except ValueError:
+        return {}
+
+
+def write_state(root, **fields):
+    path = os.path.join(root, "orchestrator-spec", "install-state.json")
+    state = read_state(root)
+    state.update(fields)
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as fh:
+        json.dump(state, fh, indent=2, sort_keys=True)
+        fh.write("\n")
+    os.replace(tmp, path)
+    return path
+
+
+def run_checks(root, is_codex):
+    del FAILURES[:]
+    cfg = check_json(root)
+    rows = readme_table(root)
+    (check_codex if is_codex else check_claude)(root, cfg, rows)
+    check_prompt_hashes(root, is_codex)
+    check_tree(root)
+    return list(FAILURES)
+
+
+def sync_start(root, is_codex, cli_version):
+    """Everything mechanical, in the one order that is correct."""
+    print("== orchestrate-sync: start ==")
+    good, message = migrate(root)
+    print(("  migrate:  " if good else "  migrate:  FAILED -- ") + message)
+    if not good:
+        print("NEXT: STOP -- fix the config before anything else.")
+        return 1
+
+    hashes = os.path.join(root, HASHES)
+    if os.path.isfile(hashes):
+        print("  hashes:   already recorded")
+    else:
+        _, count = bless(root, is_codex)
+        print("  hashes:   recorded %d prompt bodies (first run)" % count)
+
+    problems = run_checks(root, is_codex)
+    if problems:
+        for msg in problems:
+            print("  FAIL: " + msg)
+        print("NEXT: STOP -- fix what is listed above. Never edit a prompt "
+              "body to make a check pass; re-bless only a change you meant.")
+        return 1
+    print("  verify:   clean")
+
+    state = read_state(root)
+    seen = state.get("cliVersion")
+    print("  recorded CLI version: %s" % (seen or "none yet"))
+    print("  current  CLI version: %s" % (cli_version or "not supplied"))
+    if cli_version and seen and cli_version.strip() == str(seen).strip():
+        print("NEXT: FAST-PATH -- the CLI has not moved since the last check. "
+              "Skip the discovery steps, report no drift, and finish.")
+    elif not cli_version:
+        print("NEXT: FULL-PASS -- no --cli-version was supplied, so the "
+              "version cannot be ruled out as a source of drift.")
+    else:
+        print("NEXT: FULL-PASS -- the CLI version differs from the last "
+              "check, so re-inspect before reporting.")
+    return 0
+
+
+def sync_finish(root, is_codex, cli_version):
+    """Verify, then record what this run saw. Never the other way round."""
+    print("== orchestrate-sync: finish ==")
+    problems = run_checks(root, is_codex)
+    if problems:
+        for msg in problems:
+            print("  FAIL: " + msg)
+        print("NEXT: STOP -- the install does not verify, so this run is not "
+              "finished. Do not report success.")
+        return 1
+    print("  verify:   clean")
+    fields = {"lastCheckedAt": __import__("datetime").date.today().isoformat()}
+    if cli_version:
+        fields["cliVersion"] = cli_version.strip()
+    path = write_state(root, **fields)
+    print("  recorded: %s" % ", ".join("%s=%s" % kv for kv in sorted(fields.items())))
+    print("  state:    %s" % path)
+    print("NEXT: DONE -- report what changed.")
+    return 0
+
+
 # ---------------------------------------------------------------- tree ----
 
 # Category only -- the matched VALUE is never printed. This runs over files
@@ -472,9 +726,24 @@ def check_tree(root):
 
 # ---------------------------------------------------------------- main ----
 
+MODES = ("--bless", "--migrate", "--sync-start", "--sync-finish")
+
+
 def main(argv):
-    args = [a for a in argv[1:] if a != "--bless"]
-    blessing = "--bless" in argv[1:]
+    args, flags, cli_version = [], set(), None
+    rest = iter(argv[1:])
+    for item in rest:
+        if item == "--cli-version":
+            cli_version = next(rest, None)
+        elif item in MODES:
+            flags.add(item)
+        elif item.startswith("--"):
+            print("Unknown option %s" % item)
+            return 2
+        else:
+            args.append(item)
+    blessing = "--bless" in flags
+    migrating = "--migrate" in flags
     if len(args) != 1:
         print(__doc__.strip())
         return 2
@@ -485,6 +754,17 @@ def main(argv):
 
     is_codex = bool(glob.glob(os.path.join(root, "agents", "*.toml")))
     platform = "codex" if is_codex else "claude"
+
+    if "--sync-start" in flags:
+        return sync_start(root, is_codex, cli_version)
+
+    if "--sync-finish" in flags:
+        return sync_finish(root, is_codex, cli_version)
+
+    if migrating:
+        good, message = migrate(root)
+        print(("OK: " if good else "FAIL: ") + message)
+        return 0 if good else 1
 
     if blessing:
         out, count = bless(root, is_codex)

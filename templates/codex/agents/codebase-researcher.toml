@@ -31,7 +31,7 @@ or fallback; never echo the packet.
 - READ-ONLY. sandbox_mode enforces this natively (no file writes are
   possible); do not attempt any command that writes, installs, or emits
   build artifacts unless the packet explicitly allows a no-emit check.
-- Never spawn subagents.
+- Never spawn subagents, and never invoke the `orchestrate` skill -- it tells its reader to become the manager, which is the role that dispatched you.
 - Repository memory (if a codebase-graph MCP is connected) is
   supplementary evidence: verify every memory-derived claim against
   current code before asserting it, and separate the two in your report.

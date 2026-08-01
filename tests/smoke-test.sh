@@ -57,7 +57,13 @@ assert d["workflow"]["waitSliceSeconds"] == 60
 ts = d["workflow"]["agentTimeoutSeconds"]
 assert ts["codebaseResearcher"] == 180 and ts["implementationWorker"] == 900
 assert ts["testValidator"] == 300 and ts["resultJudge"] == 180 and ts["correctionWorker"] == 300
-assert d["workflow"]["requireIndependentJudge"] == False
+assert d["workflow"]["judgePolicy"] == "auto", "judge policy should ship as auto"
+assert d["workflow"]["validationPolicy"] == "auto"
+assert d["workflow"]["researchPolicy"] == "auto"
+# The booleans these replaced must not ship alongside them: two answers to one
+# question, with nothing saying which wins.
+for gone in ("requireIndependentJudge", "requireValidation"):
+    assert gone not in d["workflow"], "%s still shipped" % gone
 # Pruned in schema 2: they were all-true restatements of the prompt prose.
 assert "instructionGovernance" not in d
 assert "capabilityRouting" not in d
@@ -119,10 +125,10 @@ run_install() {
   return $?
 }
 
-echo "=== 0/9: template drift (Claude vs Codex) ==="
+echo "=== 0/11: template drift (Claude vs Codex) ==="
 check_drift
 
-echo "=== 1/9: claude-only ==="
+echo "=== 1/11: claude-only ==="
 PROJ="$SCRATCH/claude-only"
 if run_install claude "$PROJ" ORCH_ALLOW_TEST_WRITES=n; then
   pass "claude-only: install.sh exited 0"
@@ -135,7 +141,7 @@ else
   fail "claude-only: install.sh failed: $(cat /tmp/smoke_install_out)"
 fi
 
-echo "=== 2/9: codex-only ==="
+echo "=== 2/11: codex-only ==="
 PROJ="$SCRATCH/codex-only"
 if ORCH_CODEX_CONFIG_PATH_OVERRIDE="$PROJ/.codex/config.toml" run_install codex "$PROJ"; then
   pass "codex-only: install.sh exited 0"
@@ -148,7 +154,7 @@ else
   fail "codex-only: install.sh failed: $(cat /tmp/smoke_install_out)"
 fi
 
-echo "=== 3/9: both ==="
+echo "=== 3/11: both ==="
 PROJ="$SCRATCH/both"
 if ORCH_CODEX_CONFIG_PATH_OVERRIDE="$PROJ/.codex/config.toml" run_install both "$PROJ"; then
   pass "both: install.sh exited 0"
@@ -159,7 +165,7 @@ else
   fail "both: install.sh failed: $(cat /tmp/smoke_install_out)"
 fi
 
-echo "=== 4/9: config.toml -- absent (created) ==="
+echo "=== 4/11: config.toml -- absent (created) ==="
 CFG="$SCRATCH/cfg-absent/config.toml"
 PROJ="$SCRATCH/cfg-absent-proj"
 if ORCH_CODEX_CONFIG_PATH_OVERRIDE="$CFG" run_install codex "$PROJ"; then
@@ -172,7 +178,7 @@ else
   fail "config.toml absent-case: install failed"
 fi
 
-echo "=== 5/9: config.toml -- present, no [agents] (appended) ==="
+echo "=== 5/11: config.toml -- present, no [agents] (appended) ==="
 CFG="$SCRATCH/cfg-noagents/config.toml"
 mkdir -p "$(dirname "$CFG")"
 printf '[other]\nfoo = "bar"\n' > "$CFG"
@@ -187,7 +193,7 @@ else
   fail "config.toml no-agents-case: install failed"
 fi
 
-echo "=== 6/9: config.toml -- has [agents], value is fine (untouched, quiet) ==="
+echo "=== 6/11: config.toml -- has [agents], value is fine (untouched, quiet) ==="
 CFG="$SCRATCH/cfg-hasagents/config.toml"
 mkdir -p "$(dirname "$CFG")"
 printf '[agents]\nmax_concurrent_threads_per_session = 8\n' > "$CFG"
@@ -206,7 +212,7 @@ else
   fail "config.toml has-agents-case: install failed"
 fi
 
-echo "=== 7/9: config.toml -- [agents] value too low (specific warning) ==="
+echo "=== 7/11: config.toml -- [agents] value too low (specific warning) ==="
 CFG="$SCRATCH/cfg-lowagents/config.toml"
 mkdir -p "$(dirname "$CFG")"
 printf '[agents]\nmax_concurrent_threads_per_session = 2\n' > "$CFG"
@@ -216,7 +222,7 @@ if ORCH_CODEX_CONFIG_PATH_OVERRIDE="$CFG" run_install codex "$PROJ"; then
   AFTER_HASH="$(sha256sum "$CFG" | cut -d' ' -f1)"
   if [ "$BEFORE_HASH" != "$AFTER_HASH" ]; then
     fail "config.toml low-agents-case: the file was modified"
-  elif grep -q "max_concurrent_threads_per_session = 2, below the 4" /tmp/smoke_install_out; then
+  elif grep -q "max_concurrent_threads_per_session = 2, below the 8" /tmp/smoke_install_out; then
     pass "config.toml low-agents-case: warned with the actual value"
   else
     fail "config.toml low-agents-case: no specific warning: $(cat /tmp/smoke_install_out)"
@@ -225,7 +231,7 @@ else
   fail "config.toml low-agents-case: install failed"
 fi
 
-echo "=== 8/9: test writes enabled -- validator gains Edit/Write ==="
+echo "=== 8/11: test writes enabled -- validator gains Edit/Write ==="
 PROJ="$SCRATCH/testwrites-on"
 if run_install claude "$PROJ" ORCH_ALLOW_TEST_WRITES=y; then
   pass "test-writes-on: install.sh exited 0"
@@ -246,7 +252,7 @@ fi
 # session transcripts, credentials and plugin trees. The verifier must read
 # only this bundle's files -- every other case installs project-scoped, which
 # is exactly why an earlier whole-root scan went unnoticed.
-echo "=== 9/9: global scope -- verifier must not read the rest of HOME ==="
+echo "=== 9/11: global scope -- verifier must not read the rest of HOME ==="
 FAKEHOME="$SCRATCH/fakehome"
 DECOY="sk-decoy-DEADBEEF0123456789"
 if env ORCH_NONINTERACTIVE=1 ORCH_PLATFORM=claude ORCH_SCOPE=global \
@@ -291,6 +297,49 @@ if env ORCH_NONINTERACTIVE=1 ORCH_PLATFORM=claude ORCH_SCOPE=global \
   fi
 else
   fail "global: install.sh failed: $(cat /tmp/smoke_install_out)"
+fi
+
+echo "=== 10/11: uninstall -- bundle gone, user's own files kept ==="
+PROJ="$SCRATCH/uninstall"
+if ORCH_CODEX_CONFIG_PATH_OVERRIDE="$PROJ/.codex/config.toml" run_install both "$PROJ"; then
+  # Decoys: the failure this case exists for is an uninstall that takes the
+  # user's own agents and skills with it.
+  echo "mine" > "$PROJ/.claude/agents/my-own-agent.md"
+  mkdir -p "$PROJ/.claude/skills/my-skill"
+  echo "x" > "$PROJ/.claude/skills/my-skill/SKILL.md"
+  if env ORCH_NONINTERACTIVE=1 ORCH_PLATFORM=both ORCH_SCOPE=project \
+       ORCH_PROJECT_DIR="$PROJ" ORCH_UNINSTALL_CONFIRM=y \
+       bash "$INSTALL" --uninstall > /tmp/smoke_uninstall_out 2>&1; then
+    if [ -e "$PROJ/.claude/agents/task-orchestrator.md" ] ||
+       [ -d "$PROJ/.claude/orchestrator-spec" ] ||
+       [ -e "$PROJ/.claude/orchestration.json" ] ||
+       [ -d "$PROJ/.claude/skills/orchestrate" ] ||
+       [ -d "$PROJ/.codex/agents" ]; then
+      fail "uninstall: bundle files survived"
+    elif [ ! -f "$PROJ/.claude/agents/my-own-agent.md" ] ||
+         [ ! -f "$PROJ/.claude/skills/my-skill/SKILL.md" ]; then
+      fail "uninstall: removed files this bundle did not install"
+    else
+      pass "uninstall: bundle removed, user's own agents and skills kept"
+    fi
+  else
+    fail "uninstall: --uninstall failed: $(cat /tmp/smoke_uninstall_out)"
+  fi
+else
+  fail "uninstall: setup install failed: $(cat /tmp/smoke_install_out)"
+fi
+
+echo "=== 11/11: config UI -- fanned-out writes keep the install verifiable ==="
+PROJ="$SCRATCH/config-ui"
+if ORCH_CODEX_CONFIG_PATH_OVERRIDE="$PROJ/.codex/config.toml" run_install both "$PROJ"; then
+  if "$PY" "$REPO_ROOT/tests/config-ui-test.py" \
+       "$PROJ/.claude" "$PROJ/.codex" > /tmp/smoke_ui_out 2>&1; then
+    pass "config UI: every setting reached all the files that must agree"
+  else
+    fail "config UI: $(grep '^FAIL' /tmp/smoke_ui_out | head -3)"
+  fi
+else
+  fail "config UI: setup install failed: $(cat /tmp/smoke_install_out)"
 fi
 
 echo ""

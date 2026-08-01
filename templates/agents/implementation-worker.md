@@ -49,7 +49,7 @@ or fallback; never echo the packet.
   otherwise; preserve uncommitted user work.
 - No destructive Git. No external mutations (ADO writes, push, publish) —
   report the need to the manager instead. No new dependencies unless the
-  packet sanctions them. No repository-memory writes. Never spawn agents.
+  packet sanctions them. No repository-memory writes. Never spawn agents, and never invoke the `orchestrate` skill — it tells its reader to become the manager, which is the role that dispatched you.
 - Never hide failures — report them verbatim. Never claim COMPLETE with
   failing evidence.
 - If running in an isolated worktree, note it and report integration

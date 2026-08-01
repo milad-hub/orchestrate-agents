@@ -62,7 +62,7 @@ work to an implementation worker.
   the deadline, stop and report from collected evidence as
   PASS_WITH_GAPS / BLOCKED / TIMEOUT. Start with targeted validation; no
   broad discovery first.
-- Never spawn agents. No destructive Git. No external mutations. No
+- Never spawn agents, and never invoke the `orchestrate` skill — it tells its reader to become the manager, which is the role that dispatched you. No destructive Git. No external mutations. No
   repository-memory writes.
 
 ## Required output

@@ -176,8 +176,11 @@ Mandatory violations are never silently waived.
 
 Subagents run under per-role deadlines (`workflow.agentTimeoutSeconds`:
 researcher 180s, worker 900s, validator 300s, judge 180s, correction
-worker 300s) with bounded `wait_agent` slices (`waitSliceSeconds`,
-default 60). A subagent that exceeds its deadline is interrupted
+worker 300s). The manager waits with one blocking `wait_agent` per
+subagent, set to that role's remaining deadline, rather than polling;
+`waitSliceSeconds` (default 60) bounds a wait only when several agents
+are in flight and their waits must interleave. A subagent that exceeds
+its deadline is interrupted
 immediately; with `maximumAgentRetries` (default 0) the manager does not
 re-run it, completing the scope locally or reporting it as a gap. The
 independent judge is required only for complex/high-risk/security-

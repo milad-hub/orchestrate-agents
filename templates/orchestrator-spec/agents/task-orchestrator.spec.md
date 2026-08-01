@@ -34,7 +34,11 @@
 11. Read `workflow.agentTimeoutSeconds` and
     `workflow.maximumAgentRetries`. Track every spawned agent ID and spawn
     time. On Claude Code delegates push a completion notification — never
-    poll; on Codex CLI `wait_agent` in `workflow.waitSliceSeconds` slices.
+    poll -- the deadline is carried in the packet, the delegate enforces
+    it on itself, and the manager checks elapsed time at each of its own
+    turns; on Codex CLI one blocking `wait_agent` per agent set to its
+    remaining deadline, with `workflow.waitSliceSeconds` slices only when
+    several waits must interleave.
     At a role deadline, stop the agent
     immediately, record TIMEOUT, and retry at most the configured count
     with a narrower packet. If retry is not useful, continue locally or

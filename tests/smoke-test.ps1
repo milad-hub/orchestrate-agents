@@ -52,7 +52,14 @@ function Test-Json {
         if ($d.workflow.agentTimeoutSeconds.testValidator -ne 300) { throw "validator timeout != 300" }
         if ($d.workflow.agentTimeoutSeconds.resultJudge -ne 180) { throw "judge timeout != 180" }
         if ($d.workflow.agentTimeoutSeconds.correctionWorker -ne 300) { throw "correction timeout != 300" }
-        if ($d.workflow.requireIndependentJudge -ne $false) { throw "requireIndependentJudge not false" }
+        if ($d.workflow.judgePolicy -ne "auto") { throw "judgePolicy should ship as auto" }
+        if ($d.workflow.validationPolicy -ne "auto") { throw "validationPolicy should ship as auto" }
+        if ($d.workflow.researchPolicy -ne "auto") { throw "researchPolicy should ship as auto" }
+        foreach ($gone in @("requireIndependentJudge", "requireValidation")) {
+            if ($d.workflow.PSObject.Properties.Name -contains $gone) {
+                throw "$gone still shipped alongside the policy that replaced it"
+            }
+        }
         # Pruned in schema 2: they were all-true restatements of the prompt prose.
         if ($d.PSObject.Properties.Name -contains "instructionGovernance") { throw "instructionGovernance should be pruned" }
         if ($d.PSObject.Properties.Name -contains "capabilityRouting") { throw "capabilityRouting should be pruned" }
@@ -126,10 +133,10 @@ function Invoke-Install {
     return $LASTEXITCODE
 }
 
-Write-Host "=== 0/9: template drift (Claude vs Codex) ==="
+Write-Host "=== 0/11: template drift (Claude vs Codex) ==="
 Test-Drift
 
-Write-Host "=== 1/9: claude-only ==="
+Write-Host "=== 1/11: claude-only ==="
 $proj = Join-Path $Scratch "claude-only"
 if ((Invoke-Install "claude" $proj) -eq 0) {
     Test-Pass "claude-only: install.ps1 exited 0"
@@ -142,7 +149,7 @@ if ((Invoke-Install "claude" $proj) -eq 0) {
     Test-Fail "claude-only: install.ps1 failed"
 }
 
-Write-Host "=== 2/9: codex-only ==="
+Write-Host "=== 2/11: codex-only ==="
 $proj = Join-Path $Scratch "codex-only"
 $cfg = Join-Path $proj ".codex\config.toml"
 if ((Invoke-Install "codex" $proj $cfg) -eq 0) {
@@ -156,7 +163,7 @@ if ((Invoke-Install "codex" $proj $cfg) -eq 0) {
     Test-Fail "codex-only: install.ps1 failed"
 }
 
-Write-Host "=== 3/9: both ==="
+Write-Host "=== 3/11: both ==="
 $proj = Join-Path $Scratch "both"
 $cfg = Join-Path $proj ".codex\config.toml"
 if ((Invoke-Install "both" $proj $cfg) -eq 0) {
@@ -168,7 +175,7 @@ if ((Invoke-Install "both" $proj $cfg) -eq 0) {
     Test-Fail "both: install.ps1 failed"
 }
 
-Write-Host "=== 4/9: config.toml -- absent (created) ==="
+Write-Host "=== 4/11: config.toml -- absent (created) ==="
 $cfg = Join-Path $Scratch "cfg-absent\config.toml"
 $proj = Join-Path $Scratch "cfg-absent-proj"
 if ((Invoke-Install "codex" $proj $cfg) -eq 0) {
@@ -181,7 +188,7 @@ if ((Invoke-Install "codex" $proj $cfg) -eq 0) {
     Test-Fail "config.toml absent-case: install failed"
 }
 
-Write-Host "=== 5/9: config.toml -- present, no [agents] (appended) ==="
+Write-Host "=== 5/11: config.toml -- present, no [agents] (appended) ==="
 $cfg = Join-Path $Scratch "cfg-noagents\config.toml"
 New-Item -ItemType Directory -Force -Path (Split-Path $cfg) | Out-Null
 [System.IO.File]::WriteAllText($cfg, "[other]`nfoo = `"bar`"`n")
@@ -197,7 +204,7 @@ if ((Invoke-Install "codex" $proj $cfg) -eq 0) {
     Test-Fail "config.toml no-agents-case: install failed"
 }
 
-Write-Host "=== 6/9: config.toml -- has [agents], value is fine (untouched, quiet) ==="
+Write-Host "=== 6/11: config.toml -- has [agents], value is fine (untouched, quiet) ==="
 $cfg = Join-Path $Scratch "cfg-hasagents\config.toml"
 New-Item -ItemType Directory -Force -Path (Split-Path $cfg) | Out-Null
 [System.IO.File]::WriteAllText($cfg, "[agents]`nmax_concurrent_threads_per_session = 8`n")
@@ -217,7 +224,7 @@ if ((Invoke-Install "codex" $proj $cfg) -eq 0) {
     Test-Fail "config.toml has-agents-case: install failed"
 }
 
-Write-Host "=== 7/9: config.toml -- [agents] value too low (specific warning) ==="
+Write-Host "=== 7/11: config.toml -- [agents] value too low (specific warning) ==="
 $cfg = Join-Path $Scratch "cfg-lowagents\config.toml"
 New-Item -ItemType Directory -Force -Path (Split-Path $cfg) | Out-Null
 [System.IO.File]::WriteAllText($cfg, "[agents]`nmax_concurrent_threads_per_session = 2`n")
@@ -228,7 +235,7 @@ if ((Invoke-Install "codex" $proj $cfg) -eq 0) {
     $installOut = Get-Content (Join-Path $env:TEMP "orch_smoke_install_out.txt") -Raw
     if ($beforeHash -ne $afterHash) {
         Test-Fail "config.toml low-agents-case: the file was modified"
-    } elseif ($installOut -match "max_concurrent_threads_per_session = 2, below the 4") {
+    } elseif ($installOut -match "max_concurrent_threads_per_session = 2, below the 8") {
         Test-Pass "config.toml low-agents-case: warned with the actual value"
     } else {
         Test-Fail "config.toml low-agents-case: no specific warning"
@@ -237,7 +244,7 @@ if ((Invoke-Install "codex" $proj $cfg) -eq 0) {
     Test-Fail "config.toml low-agents-case: install failed"
 }
 
-Write-Host "=== 8/9: test writes enabled -- validator gains Edit/Write ==="
+Write-Host "=== 8/11: test writes enabled -- validator gains Edit/Write ==="
 $proj = Join-Path $Scratch "testwrites-on"
 if ((Invoke-Install "claude" $proj "" "y") -eq 0) {
     Test-Pass "test-writes-on: install.ps1 exited 0"
@@ -258,7 +265,7 @@ if ((Invoke-Install "claude" $proj "" "y") -eq 0) {
 # session transcripts, credentials and plugin trees. The verifier must read
 # only this bundle's files -- every other case installs project-scoped, which
 # is exactly why an earlier whole-root scan went unnoticed.
-Write-Host "=== 9/9: global scope -- verifier must not read the rest of HOME ==="
+Write-Host "=== 9/11: global scope -- verifier must not read the rest of HOME ==="
 $fakeHome = Join-Path $Scratch "fakehome"
 $decoy = "sk-decoy-DEADBEEF0123456789"
 $savedHome = $env:USERPROFILE
@@ -315,6 +322,55 @@ if ($installRc -eq 0) {
     }
 } else {
     Test-Fail "global: install.ps1 failed"
+}
+
+Write-Host "=== 10/11: uninstall -- bundle gone, user's own files kept ==="
+$proj = Join-Path $Scratch "uninstall"
+if ((Invoke-Install "both" $proj (Join-Path $proj ".codex\config.toml")) -eq 0) {
+    # Decoys: the failure this case exists for is an uninstall that takes the
+    # user's own agents and skills with it.
+    Set-Content -Encoding utf8 (Join-Path $proj ".claude\agents\my-own-agent.md") "mine"
+    New-Item -ItemType Directory -Force -Path (Join-Path $proj ".claude\skills\my-skill") | Out-Null
+    Set-Content -Encoding utf8 (Join-Path $proj ".claude\skills\my-skill\SKILL.md") "x"
+    $env:ORCH_UNINSTALL_CONFIRM = "y"
+    & powershell -NoProfile -ExecutionPolicy Bypass -File $Install -Uninstall | Out-Null
+    $rc = $LASTEXITCODE
+    Remove-Item Env:\ORCH_UNINSTALL_CONFIRM -ErrorAction SilentlyContinue
+    $survived = @(".claude\agents\task-orchestrator.md", ".claude\orchestrator-spec",
+                  ".claude\orchestration.json", ".claude\skills\orchestrate",
+                  ".codex\agents") |
+        Where-Object { Test-Path (Join-Path $proj $_) }
+    if ($rc -ne 0) {
+        Test-Fail "uninstall: install.ps1 -Uninstall failed"
+    } elseif ($survived.Count -gt 0) {
+        Test-Fail "uninstall: bundle files survived: $($survived -join ', ')"
+    } elseif (-not (Test-Path (Join-Path $proj ".claude\agents\my-own-agent.md")) -or
+              -not (Test-Path (Join-Path $proj ".claude\skills\my-skill\SKILL.md"))) {
+        Test-Fail "uninstall: removed files this bundle did not install"
+    } else {
+        Test-Pass "uninstall: bundle removed, user's own agents and skills kept"
+    }
+} else {
+    Test-Fail "uninstall: setup install failed"
+}
+
+Write-Host "=== 11/11: config UI -- fanned-out writes keep the install verifiable ==="
+$proj = Join-Path $Scratch "config-ui"
+if ((Invoke-Install "both" $proj (Join-Path $proj ".codex\config.toml")) -eq 0) {
+    $py = Get-Python
+    if (-not $py) {
+        Test-Fail "config UI: no python on PATH -- the UI test cannot run"
+    } else {
+        $out = & $py (Join-Path $RepoRoot "tests\config-ui-test.py") `
+            (Join-Path $proj ".claude") (Join-Path $proj ".codex")
+        if ($LASTEXITCODE -eq 0) {
+            Test-Pass "config UI: every setting reached all the files that must agree"
+        } else {
+            Test-Fail "config UI: $(($out | Select-String '^FAIL' | Select-Object -First 3) -join '; ')"
+        }
+    }
+} else {
+    Test-Fail "config UI: setup install failed"
 }
 
 Remove-Item -Recurse -Force $Scratch -ErrorAction SilentlyContinue

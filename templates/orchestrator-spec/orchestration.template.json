@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 2,
+  "schemaVersion": 3,
   "orchestrator": {
     "model": "opus",
     "desiredEffort": "high"
@@ -40,10 +40,11 @@
     },
     "delegateOnlyWhenUseful": true,
     "requireAcceptanceCriteria": true,
-    "requireIndependentJudge": false,
+    "researchPolicy": "auto",
+    "judgePolicy": "auto",
+    "validationPolicy": "auto",
     "requireManagerReview": true,
     "requireFinalDiffReview": true,
-    "requireValidation": true,
     "avoidOverlappingEdits": true
   },
   "permissions": {

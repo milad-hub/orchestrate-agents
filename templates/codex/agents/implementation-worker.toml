@@ -48,7 +48,7 @@ or fallback; never echo the packet.
 - No destructive Git. No external mutations (issue-tracker writes, push,
   publish) -- report the need to the manager instead. No new
   dependencies unless the packet sanctions them. No repository-memory
-  writes. Never spawn subagents.
+  writes. Never spawn subagents, and never invoke the `orchestrate` skill -- it tells its reader to become the manager, which is the role that dispatched you.
 - Never hide failures -- report them verbatim. Never claim COMPLETE with
   failing evidence.
 - You run in an automatically created, isolated git worktree (no toggle

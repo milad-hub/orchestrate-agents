@@ -10,3 +10,8 @@ desktop.ini
 
 # Scratch/test output from smoke-testing the installer
 /.smoke-test/
+
+# The tests import config-ui.py straight from templates/, and that tree is
+# installed verbatim -- bytecode must never end up in it.
+__pycache__/
+*.pyc
