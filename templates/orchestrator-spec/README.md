@@ -26,6 +26,9 @@ describe the runtime files as generated from these specs alone.
 | `policies/` | Permissions, routing, testing, judging, security, etc. |
 | `agents/` | Per-agent full specifications |
 | `skill/orchestrate.spec.md` | `/orchestrate` entry-point skill spec |
+| `skill/orchestrate-sync.spec.md` | `/orchestrate-sync` maintenance skill spec |
+| `verify-install.py` | The install's invariants, as runnable code |
+| `config-ui.py` | The browser settings UI |
 
 ## Generated runtime files
 
@@ -36,6 +39,7 @@ describe the runtime files as generated from these specs alone.
 - `{{AGENT_HOME_DIR}}/agents/test-validator.md` (haiku, medium, test-writes only)
 - `{{AGENT_HOME_DIR}}/agents/result-judge.md` (sonnet, high, read-only)
 - `{{AGENT_HOME_DIR}}/skills/orchestrate/SKILL.md`
+- `{{AGENT_HOME_DIR}}/skills/orchestrate-sync/SKILL.md`
 - `{{AGENT_HOME_DIR}}/README-orchestration.md`
 
 ## Regeneration
@@ -55,7 +59,12 @@ without asking.
 
 `orchestrator-spec/verify-install.py` is the executable definition of this
 install's invariants; `install-state.json` records the platform, bundle
-version and last-checked CLI version that `/orchestrate-sync` reads.
+version and last-checked CLI version that `/orchestrate-sync` reads. It
+also carries the schema migration (`--migrate`, from schemaVersion 1 or 2)
+and the prompt-body blessing (`--bless`) that makes a deliberate prompt
+edit distinguishable from tampering.
+
+Upstream: https://github.com/milad-hub/orchestrate-agents
 
 ## Environment notes
 

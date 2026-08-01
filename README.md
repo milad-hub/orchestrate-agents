@@ -41,17 +41,26 @@ before anything is reported done.
 
 ## Install
 
-Clone or download this repo, then from inside it run:
-
 ```bash
+git clone https://github.com/milad-hub/orchestrate-agents.git
+cd orchestrate-agents
 ./install.sh
 ```
 
 or, on Windows:
 
 ```powershell
+git clone https://github.com/milad-hub/orchestrate-agents.git
+cd orchestrate-agents
 .\install.ps1
 ```
+
+Downloading the ZIP works too — the installer only reads `templates/`
+and never calls `git` on itself.
+
+Before it writes anything, the installer checks this machine for `git`,
+`python3` (3.7+) and the CLI for the platform you picked, and tells you
+what would break if one is missing.
 
 You'll be asked:
 1. **Platform** — Claude Code, Codex CLI, or Both.
@@ -62,8 +71,10 @@ You'll be asked:
    install — Codex has no per-project config file for it. Your existing
    `config.toml` is never overwritten; an existing `[agents]` table is left
    untouched, and the installer only says anything if
-   `max_concurrent_threads_per_session` is below the 4 parallel delegates
-   the manager plans for.)
+   `max_concurrent_threads_per_session` is below 8 — the ceiling the
+   settings UI can select, not the 4 delegates the manager plans for by
+   default. Codex only ever runs what the manager asks for, so a higher
+   cap costs nothing and a lower one silently shrinks the fan-out.)
 
 That's the whole interview — two questions, plus a confirmation if an
 existing install is about to be overwritten.
@@ -220,10 +231,13 @@ python3 ~/.claude/orchestrator-spec/verify-install.py --migrate ~/.claude
 ```
 
 `/orchestrate-sync` runs it, and the config UI offers it when it sees an old
-file. It is a no-op when the schema already matches. Schema 3 added
-`workflow.researchPolicy`, `judgePolicy` and `validationPolicy`
-(`never` / `auto` / `always`), derived from the booleans they replace, so a
-migrated install behaves exactly as before until you pick a profile.
+file. It is a no-op when the schema already matches. Both older schemas
+migrate: **2 → 3** added `workflow.researchPolicy`, `judgePolicy` and
+`validationPolicy` (`never` / `auto` / `always`), derived from the booleans
+they replace; **1 → 3** additionally drops two descriptive blocks nothing
+reads any more and backfills the bounded-execution keys (`agentTimeoutSeconds`,
+`waitSliceSeconds`, `maximumAgentRetries`). Either way a migrated install
+behaves exactly as before until you pick a profile.
 
 ### Uninstalling
 
@@ -313,6 +327,9 @@ directory/directories you installed it into.
 
 ```
 install.sh / install.ps1   — installers, and --uninstall / -Uninstall
+tests/                     — smoke suites (bash + PowerShell) and the
+                              config-UI test; they install into a
+                              throwaway directory and verify the result
 templates/
   orchestrator-spec/       — shared spec source (edit + regenerate),
                               platform-neutral, used by both generators
@@ -338,6 +355,22 @@ installed `orchestrator-spec/` directly and ask your session to
 regenerate per its `generation-plan.md`. Run `/orchestrate-sync`
 periodically to keep the capability deny-list and tool/MCP routing in
 sync with your installation as it changes.
+
+## Issues and contributions
+
+Bug reports and pull requests: https://github.com/milad-hub/orchestrate-agents/issues.
+
+A change to shared behavior belongs in `templates/orchestrator-spec/`
+first, then in both platform templates — `generation-plan.md` explains
+how the two are reconciled. Run both smoke suites before opening a PR:
+
+```bash
+bash tests/smoke-test.sh
+```
+
+```powershell
+.\tests\smoke-test.ps1
+```
 
 ## License
 
