@@ -163,7 +163,7 @@ themselves, and nothing walks it.
 |---|---|---|
 | `knowledge.enabled` | `true` | Off means agents work from their prompts alone |
 | `knowledge.maximumDocuments` | `12` | How many documents may reach one run |
-| `knowledge.maximumCharacters` | `24000` | The other half of the budget, usually the binding one |
+| `knowledge.maximumCharacters` | `24000` | The other half of the budget. The shipped documents total well under it |
 | `knowledge.rankingPolicy` | `applicability-precedence` | Which documents win when the budget cannot take them all |
 | `knowledge.allowProposals` | `false` | Whether an agent may write a proposed rule to `.orchestrate/proposals/`. Proposals are never merged automatically |
 

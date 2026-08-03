@@ -257,8 +257,10 @@ def build_fields(is_codex):
                      "not a target -- ranking decides which ones, this decides "
                      "where it stops.", "int", min=1, max=50))
     out.append(field("knowledge.maximumCharacters", cat, "Character budget",
-                     "The other half of the budget, and usually the one that "
-                     "binds first. Characters of knowledge text per run.",
+                     "The other half of the budget: characters of knowledge "
+                     "text per run. The documents that ship total well under "
+                     "the default, so this only bites once a repository adds "
+                     "its own or you lower it deliberately.",
                      "int", min=2000, max=200000))
     out.append(field("knowledge.rankingPolicy", cat, "Ranking policy",
                      "Which documents win when the budget cannot take them "
