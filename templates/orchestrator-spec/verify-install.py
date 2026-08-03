@@ -10,6 +10,8 @@ against every test install so the list is exercised on every commit.
     python3 verify-install.py --migrate <install-dir>
     python3 verify-install.py --sync-start <install-dir> [--cli-version V]
     python3 verify-install.py --sync-finish <install-dir> [--cli-version V]
+    python3 verify-install.py --index-knowledge <dir>
+    python3 verify-install.py --check-knowledge <dir>
 
 <install-dir> is the directory holding orchestration.json, agents/ and
 orchestrator-spec/ -- i.e. ~/.claude or ~/.codex (or a project-scoped
@@ -33,6 +35,13 @@ so /orchestrate-sync cannot reword a delegate's prompt while it is in there
 editing frontmatter. Fields the skill is allowed to change (tools/model/effort
 on Claude; everything outside developer_instructions on Codex) are excluded
 from the hash. Re-bless after a deliberate prompt edit.
+
+--index-knowledge regenerates orchestrator-spec/knowledge/index.json from the
+tree, and --check-knowledge verifies the two still agree. The manifest is how
+agents find knowledge without walking the tree, so a document added without
+regenerating would sit on disk unselectable, looking installed; the standard
+run checks for exactly that. Both take either an install root or the directory
+holding knowledge/, so they also run against templates/ in this repository.
 
 Only files this bundle installed are ever read -- never the rest of the home
 directory. Prints one line per failure and exits non-zero.
@@ -76,17 +85,31 @@ CODEX_SANDBOX = {
 # not a count -- a count cannot be checked against anything.
 MANDATORY_BLOCKS = {
     "task-orchestrator": ("## Instruction hierarchy (mandatory)",
+                          "## Repository profile (mandatory)",
+                          "## Knowledge assembly (mandatory)",
+                          "## Declared capabilities",
+                          "## Skill invocation",
                           "## Hard limits"),
     "codebase-researcher": ("## Instruction hierarchy (mandatory)",
-                            "## Capability packet (mandatory)"),
+                            "## Capability packet (mandatory)",
+                            "## Knowledge (mandatory)",
+                            "## Declared capabilities"),
     "implementation-worker": ("## Instruction hierarchy (mandatory)",
-                              "## Capability packet (mandatory)"),
+                              "## Capability packet (mandatory)",
+                              "## Knowledge (mandatory)",
+                              "## Declared capabilities"),
     "test-validator": ("## Instruction hierarchy (mandatory)",
-                       "## Capability packet (mandatory)"),
+                       "## Capability packet (mandatory)",
+                       "## Knowledge (mandatory)",
+                       "## Declared capabilities"),
     "result-judge": ("## Instruction hierarchy (mandatory)",
                      "## Capability packet (mandatory)",
+                     "## Knowledge (mandatory)",
+                     "## Declared capabilities",
                      "## Independence (mandatory)"),
 }
+SCHEMA = 4
+MIGRATABLE = (1, 2, 3)
 HASHES = "orchestrator-spec/prompt-hashes.json"
 # Frontmatter fields /orchestrate-sync may legitimately rewrite, so they are
 # excluded from the prompt-body hash.
@@ -166,14 +189,15 @@ def check_json(root):
     # decision, so it is only checked for being sane; the config UI offers
     # exactly the values these two functions accept.
     schema = d.get("schemaVersion")
-    if schema in (1, 2):
-        fail("%s: schemaVersion is %s -- this bundle wants 3. Migrate it: "
-             "verify-install.py --migrate <dir>" % (rel, schema))
+    stale = schema in MIGRATABLE
+    if stale:
+        fail("%s: schemaVersion is %s -- this bundle wants %d. Migrate it: "
+             "verify-install.py --migrate <dir>" % (rel, schema, SCHEMA))
     else:
-        want(schema, 3, "schemaVersion")
+        want(schema, SCHEMA, "schemaVersion")
     for key in ("researchPolicy", "judgePolicy", "validationPolicy"):
         value = d.get("workflow", {}).get(key)
-        if schema not in (1, 2) and value not in ("never", "auto", "always"):
+        if not stale and value not in ("never", "auto", "always"):
             fail("%s: workflow.%s is %r, expected never, auto or always"
                  % (rel, key, value))
     want_bool(d.get("defaultGlobalAgent"), "defaultGlobalAgent")
@@ -193,6 +217,27 @@ def check_json(root):
     want_bool(mem.get("persistentAgentMemory"), "memory.persistentAgentMemory")
     want_bool(mem.get("allowRepositoryMemoryWrites"),
               "memory.allowRepositoryMemoryWrites")
+
+    if not stale:
+        kn = d.get("knowledge")
+        if not isinstance(kn, dict):
+            fail("%s: knowledge block is missing" % rel)
+        else:
+            want_bool(kn.get("enabled"), "knowledge.enabled")
+            # Bounded, not pinned: the budget is a tuning decision. What must
+            # hold is that it stays a budget -- unbounded selection is the
+            # failure this whole section exists to prevent.
+            want_range(kn.get("maximumDocuments"), 1, 50,
+                       "knowledge.maximumDocuments")
+            want_range(kn.get("maximumCharacters"), 2000, 200000,
+                       "knowledge.maximumCharacters")
+            policy = kn.get("rankingPolicy")
+            if not isinstance(policy, str) or not ID.match(policy or ""):
+                fail("%s: knowledge.rankingPolicy is %r, expected a "
+                     "lowercase-hyphenated policy name" % (rel, policy))
+            # Proposals write knowledge. Off is the shipped answer; on is a
+            # deliberate decision, never a default.
+            want_bool(kn.get("allowProposals"), "knowledge.allowProposals")
 
     for key in ("codebaseResearcher", "implementationWorker", "testValidator",
                 "resultJudge", "correctionWorker"):
@@ -336,6 +381,16 @@ V1_WORKFLOW_DEFAULTS = {
 # in them now lives in a prompt. Dropped on migration so the file describes
 # what is actually enforced.
 V1_DEAD_BLOCKS = ("instructionGovernance", "capabilityRouting")
+# The knowledge layer arrived in schemaVersion 4. Backfilled with what this
+# bundle ships, so a migrated install behaves exactly as it did before -- the
+# layer is on, but every value is the shipped default and proposals are off.
+V3_KNOWLEDGE_DEFAULTS = {
+    "enabled": True,
+    "maximumDocuments": 12,
+    "maximumCharacters": 24000,
+    "rankingPolicy": "applicability-precedence",
+    "allowProposals": False,
+}
 
 
 def migrate(root):
@@ -351,11 +406,12 @@ def migrate(root):
     except ValueError as exc:
         return False, "orchestration.json: does not parse: %s" % exc
     version = d.get("schemaVersion")
-    if version == 3:
-        return True, "orchestration.json is already at schemaVersion 3"
-    if version not in (1, 2):
-        return False, ("orchestration.json: schemaVersion is %r, and only 1 "
-                       "or 2 can be migrated" % version)
+    if version == SCHEMA:
+        return True, "orchestration.json is already at schemaVersion %d" % SCHEMA
+    if version not in MIGRATABLE:
+        return False, ("orchestration.json: schemaVersion is %r, and only %s "
+                       "can be migrated"
+                       % (version, ", ".join(str(v) for v in MIGRATABLE)))
 
     wf = d.setdefault("workflow", {})
     added = []
@@ -367,23 +423,32 @@ def migrate(root):
             if key not in wf:
                 wf[key] = value
                 added.append("%s=%s" % (key, json.dumps(wf[key])))
-    for key, (old_key, when_true, when_false) in sorted(POLICY_FROM_BOOL.items()):
-        if key not in wf:
-            wf[key] = when_true if wf.get(old_key) is True else when_false
-            added.append("%s=%s" % (key, wf[key]))
-    if "researchPolicy" not in wf:
-        # Never had a boolean: the manager always decided from the class.
-        wf["researchPolicy"] = "auto"
-        added.append("researchPolicy=auto")
-    d["schemaVersion"] = 3
+    if version < 3:
+        for key, (old_key, when_true, when_false) in sorted(POLICY_FROM_BOOL.items()):
+            if key not in wf:
+                wf[key] = when_true if wf.get(old_key) is True else when_false
+                added.append("%s=%s" % (key, wf[key]))
+        if "researchPolicy" not in wf:
+            # Never had a boolean: the manager always decided from the class.
+            wf["researchPolicy"] = "auto"
+            added.append("researchPolicy=auto")
+    # 3 -> 4. Additive: an existing key is never overwritten, so a file that
+    # already carries a tuned budget keeps it.
+    kn = d.setdefault("knowledge", {})
+    for key, value in sorted(V3_KNOWLEDGE_DEFAULTS.items()):
+        if key not in kn:
+            kn[key] = value
+            added.append("knowledge.%s=%s" % (key, json.dumps(value)))
+    d["schemaVersion"] = SCHEMA
 
     tmp = path + ".tmp"
     with open(tmp, "w", encoding="utf-8") as fh:
         json.dump(d, fh, indent=2)
         fh.write("\n")
     os.replace(tmp, path)
-    return True, "Migrated orchestration.json from %d to schemaVersion 3 " \
-                 "(%s)" % (version, ", ".join(added) or "no keys needed adding")
+    return True, "Migrated orchestration.json from %d to schemaVersion %d " \
+                 "(%s)" % (version, SCHEMA,
+                           ", ".join(added) or "no keys needed adding")
 
 
 def bless(root, is_codex):
@@ -426,7 +491,395 @@ def check_prompt_hashes(root, is_codex):
                  % (os.path.basename(path_), expected[:14], actual[:14]))
 
 
+# ---------------------------------------------------------- knowledge ----
+
+KNOWLEDGE = "orchestrator-spec/knowledge"
+MANIFEST = KNOWLEDGE + "/index.json"
+CATEGORIES = ("memory", "rule", "skill", "provider", "template")
+# Directories under knowledge/ whose documents are illustrations rather than
+# installed knowledge. Schema-checked like everything else -- an example of the
+# schema that does not follow it teaches the wrong shape -- but never indexed,
+# so no agent can select one.
+NOT_INDEXED = ("examples",)
+FIELDS = ("id", "category", "title", "applies", "precedence")
+ID = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
+# Applicability tokens are matched against the repository profile by equality,
+# so a token that is not a plausible profile value can never match anything --
+# it silently excludes its own document instead of failing loudly. Checking the
+# SHAPE, not a fixed vocabulary: the set of technologies is open, and a closed
+# list here would reject the next framework rather than the next typo.
+TOKEN_SHAPE = re.compile(r"^[a-z0-9]+([.+-][a-z0-9]+)*$")
+# A skill is invoked by name and reported against, so a descriptor missing one
+# of these is a skill that cannot be finished against anything. Named headings,
+# not a count -- a count cannot be checked against anything.
+SKILL_SECTIONS = ("## Purpose", "## Prerequisites", "## Required context",
+                  "## Execution steps", "## Expected outputs",
+                  "## Validation checklist", "## Quality checklist",
+                  "## Completion criteria")
+
+
+def knowledge_docs(base):
+    """Every knowledge document under base/knowledge, sorted by relative path.
+
+    README.md files are documentation about the tree rather than knowledge in
+    it: they carry no frontmatter and are not indexed.
+    """
+    root = os.path.join(base, "knowledge")
+    out = []
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames.sort()
+        for name in sorted(filenames):
+            if not name.endswith(".md") or name == "README.md":
+                continue
+            path = os.path.join(dirpath, name)
+            rel = os.path.relpath(path, root).replace("\\", "/")
+            out.append((rel, path))
+    return sorted(out)
+
+
+def indexed(rel):
+    return not any(part in NOT_INDEXED for part in rel.split("/")[:-1])
+
+
+def knowledge_entry(rel, path):
+    """(entry, [problem, ...]) for one document. entry is None if unusable."""
+    problems = []
+    text = read(path)
+    meta = frontmatter(text)
+    if meta is None:
+        return None, ["%s: no frontmatter block" % rel]
+
+    missing = [f for f in FIELDS if not meta.get(f)]
+    if missing:
+        problems.append("%s: frontmatter is missing %s"
+                        % (rel, ", ".join(missing)))
+    extra = sorted(set(meta) - set(FIELDS))
+    if extra:
+        problems.append("%s: unknown frontmatter field(s) %s -- the schema is "
+                        "exactly %s" % (rel, ", ".join(extra),
+                                        ", ".join(FIELDS)))
+
+    doc_id = meta.get("id", "")
+    stem = os.path.basename(rel)[:-3]
+    if doc_id and not ID.match(doc_id):
+        problems.append("%s: id %r is not lowercase-hyphenated" % (rel, doc_id))
+    elif doc_id and doc_id != stem:
+        problems.append("%s: id %r does not match the filename (%r)"
+                        % (rel, doc_id, stem))
+
+    category = meta.get("category", "")
+    if category and category not in CATEGORIES:
+        problems.append("%s: category %r is not one of %s"
+                        % (rel, category, ", ".join(CATEGORIES)))
+
+    raw = meta.get("precedence", "")
+    try:
+        precedence = int(raw)
+    except ValueError:
+        problems.append("%s: precedence %r is not an integer" % (rel, raw))
+        precedence = None
+    else:
+        if not 0 <= precedence <= 100:
+            problems.append("%s: precedence %d is outside 0-100"
+                            % (rel, precedence))
+
+    # The template that defines the shape is a template, not a skill: it
+    # documents the headings rather than filling them in.
+    if category == "skill":
+        absent = [s for s in SKILL_SECTIONS if s not in text]
+        if absent:
+            problems.append("%s: skill descriptor is missing %s"
+                            % (rel, ", ".join(s[3:] for s in absent)))
+
+    applies = [t.strip() for t in meta.get("applies", "").split(",") if t.strip()]
+    if "*" in applies and len(applies) > 1:
+        problems.append("%s: applies mixes * with tokens -- a document applies "
+                        "everywhere or to named technologies, not both" % rel)
+    for token in applies:
+        if token != "*" and not TOKEN_SHAPE.match(token):
+            problems.append("%s: applicability token %r is not a lowercase "
+                            "technology name -- it can never match a "
+                            "repository profile" % (rel, token))
+
+    if problems:
+        return None, problems
+    return {
+        "id": doc_id,
+        "category": category,
+        "title": meta["title"],
+        "path": rel,
+        "applies": applies,
+        "precedence": precedence,
+    }, []
+
+
+# Directory a category's documents live in. A rule filed under memory/ is
+# findable by id and wrong about what it is, which is worse than missing.
+HOME = {"memory": "memory", "rule": "rules", "skill": "skills",
+        "provider": "providers", "template": "templates"}
+# [[other-document]] -- the tree's own cross-reference syntax.
+LINK = re.compile(r"\[\[([^\]]+)\]\]")
+
+
+def check_relations(docs, problems):
+    """Checks that need the whole tree, not one document.
+
+    Everything here is a defect a per-file check cannot see: two documents
+    claiming the same thing, a reference to a document that is not there, a
+    cycle, or a document filed where its category says it is not.
+    """
+    by_id = {}
+    for rel, entry, text in docs:
+        by_id.setdefault(entry["id"], []).append(rel)
+        by_id.setdefault("%s/%s" % (entry["category"], entry["id"]), []).append(rel)
+
+    titles = {}
+    for rel, entry, text in docs:
+        home = HOME.get(entry["category"])
+        top = rel.split("/")[0]
+        if home and top != home:
+            problems.append("%s: category %r belongs under %s/, not %s/"
+                            % (rel, entry["category"], home, top))
+        # The security band is what "never overridden by convenience" means.
+        # A template or a memory note sitting in it would outrank the security
+        # rules while carrying none of their authority.
+        if entry["precedence"] >= 80 and entry["category"] not in ("rule", "skill"):
+            problems.append("%s: precedence %d is the security band, which only "
+                            "rules and skills may occupy"
+                            % (rel, entry["precedence"]))
+        key = (entry["category"], entry["title"].strip().lower())
+        if key in titles:
+            problems.append("%s: duplicate title %r -- already used by %s"
+                            % (rel, entry["title"], titles[key]))
+        else:
+            titles[key] = rel
+
+        for target in LINK.findall(text):
+            target = target.strip()
+            if target not in by_id:
+                problems.append("%s: link [[%s]] resolves to nothing"
+                                % (rel, target))
+            elif len(by_id[target]) > 1:
+                problems.append("%s: link [[%s]] is ambiguous between %s"
+                                % (rel, target, ", ".join(sorted(by_id[target]))))
+
+    # Cycles over the link graph. A loop is not always wrong between two
+    # documents, but a chain that returns to its start is a definition that
+    # depends on itself, and nothing downstream can order it.
+    edges = {}
+    for rel, entry, text in docs:
+        targets = {r for t in LINK.findall(text) for r in by_id.get(t.strip(), [])}
+        if rel in targets:
+            problems.append("%s: circular reference -- links to itself" % rel)
+        edges[rel] = sorted(targets - {rel})
+    state = {}
+
+    def walk(node, trail):
+        if state.get(node) == "done":
+            return
+        if state.get(node) == "open":
+            loop = trail[trail.index(node):] + [node]
+            problems.append("%s: circular reference %s"
+                            % (node, " -> ".join(loop)))
+            return
+        state[node] = "open"
+        for nxt in edges.get(node, ()):
+            walk(nxt, trail + [node])
+        state[node] = "done"
+
+    for rel in sorted(edges):
+        walk(rel, [])
+
+
+def build_manifest(base):
+    """(manifest, [problem, ...]) derived from the tree as it is on disk."""
+    entries, problems, seen, docs = [], [], {}, []
+    for rel, path in knowledge_docs(base):
+        entry, found = knowledge_entry(rel, path)
+        problems.extend(found)
+        if entry is None:
+            continue
+        key = (entry["category"], entry["id"])
+        if key in seen:
+            problems.append("%s: duplicate %s id %r -- already used by %s"
+                            % (rel, entry["category"], entry["id"], seen[key]))
+            continue
+        seen[key] = rel
+        docs.append((rel, entry, read(os.path.join(base, "knowledge", rel))))
+        if indexed(rel):
+            entries.append(entry)
+    check_relations(docs, problems)
+    manifest = {
+        "schemaVersion": 1,
+        "note": "Generated. Do not hand-edit; see "
+                "verify-install.py --index-knowledge",
+        "documents": sorted(entries, key=lambda e: (e["category"], e["id"])),
+    }
+    return manifest, problems
+
+
+def write_manifest(base):
+    manifest, problems = build_manifest(base)
+    out = os.path.join(base, "knowledge", "index.json")
+    with open(out, "w", encoding="utf-8") as fh:
+        json.dump(manifest, fh, indent=2, sort_keys=True)
+        fh.write("\n")
+    return out, len(manifest["documents"]), problems
+
+
+def check_knowledge(base):
+    """Schema validity, plus a manifest that still matches the tree.
+
+    `base` is the directory holding knowledge/ -- orchestrator-spec/ in an
+    install, or templates/orchestrator-spec/ in this repository.
+
+    A stale manifest is the failure mode worth catching: adding a rule without
+    regenerating leaves it on disk, unselectable, looking installed.
+    """
+    if not os.path.isdir(os.path.join(base, "knowledge")):
+        fail("%s: knowledge tree is missing" % KNOWLEDGE)
+        return
+    manifest, problems = build_manifest(base)
+    for msg in problems:
+        fail(KNOWLEDGE + "/" + msg)
+
+    path = os.path.join(base, "knowledge", "index.json")
+    if not os.path.isfile(path):
+        fail("%s: manifest is missing -- regenerate with "
+             "verify-install.py --index-knowledge <dir>" % MANIFEST)
+        return
+    try:
+        stored = json.loads(read(path))
+    except ValueError as exc:
+        fail("%s: does not parse: %s" % (MANIFEST, exc))
+        return
+    if stored.get("schemaVersion") != 1:
+        fail("%s: schemaVersion is %r, expected 1"
+             % (MANIFEST, stored.get("schemaVersion")))
+        return
+    if stored.get("documents") != manifest["documents"]:
+        stored_ids = {(d.get("category"), d.get("id"))
+                      for d in stored.get("documents", [])
+                      if isinstance(d, dict)}
+        actual_ids = {(d["category"], d["id"]) for d in manifest["documents"]}
+        detail = []
+        for kind, diff in (("not in the tree", stored_ids - actual_ids),
+                           ("not in the manifest", actual_ids - stored_ids)):
+            if diff:
+                detail.append("%s: %s" % (kind, ", ".join(
+                    "%s/%s" % pair for pair in sorted(diff))))
+        fail("%s: out of date -- %s. Regenerate with "
+             "verify-install.py --index-knowledge <dir>"
+             % (MANIFEST, "; ".join(detail) or "an entry's fields changed"))
+
+
 # ------------------------------------------------------------- claude ----
+
+# "- **Writes**: ..." from a role's declared-capabilities block.
+WRITES = re.compile(r"(?mi)^-\s*\*\*Writes\*\*:\s*(.+)$")
+
+# The packet slicing table in the manager prompt: "| `role` | `cat/id`, ... |".
+SLICE_MARK = "Packet slicing:"
+SLICE_ROW = re.compile(r"^\|\s*`([a-z][a-z-]*)`\s*\|(.*)\|\s*$")
+SLICE_REF = re.compile(r"`(%s)/([a-z0-9-]+)`" % "|".join(CATEGORIES))
+
+
+def check_registry(rel, stem, text, may_write):
+    """A role's declaration must agree with what the harness actually grants.
+
+    The declaration is what the manager routes on. When it claims a role
+    writes nothing while the harness would let it, the claim is what gets
+    trusted -- and a delegate is dispatched on a guarantee nobody is holding.
+    """
+    if stem == "task-orchestrator":
+        return  # declares the roles it routes to, not a scope of its own
+    found = WRITES.search(text)
+    if not found:
+        fail("%s: declared capabilities block has no Writes line, so nothing "
+             "says what this role may change" % rel)
+        return
+    declares_none = found.group(1).strip().lower().startswith("none")
+    if declares_none and may_write:
+        fail("%s: declares Writes: none but the harness grants writes -- the "
+             "declaration is what dispatch trusts" % rel)
+    elif stem == "implementation-worker" and not may_write:
+        fail("%s: declares it writes assigned source but the harness grants "
+             "no write" % rel)
+
+
+def slice_rows(text):
+    """{role: {(category, id), ...}} from the manager's packet slicing table.
+
+    Every row is returned, including the ones reading "the full selected set"
+    -- those carry an empty set. An unsliced role and an absent role look the
+    same otherwise, and only one of them is intentional.
+    """
+    rows, started = {}, False
+    for line in text[text.find(SLICE_MARK):].splitlines():
+        row = SLICE_ROW.match(line)
+        if row is None:
+            if started:
+                break  # the table ended
+            continue
+        started = True
+        rows[row.group(1)] = set(SLICE_REF.findall(row.group(2)))
+    return rows
+
+
+def check_slicing(rel, text, base):
+    """The slicing table must name real documents and never narrow away a
+    security-band one.
+
+    A stale id drops a rule from a delegate's packet with no error and no
+    effect -- the same silent failure the manifest exists to prevent. A
+    missing security document is worse: the narrowed roles are the ones
+    reading untrusted repository content.
+    """
+    if SLICE_MARK not in text:
+        fail("%s: no %r table, so nothing says which documents reach which "
+             "delegate" % (rel, SLICE_MARK))
+        return
+    rows = slice_rows(text)
+    if not rows:
+        fail("%s: packet slicing table has no rows" % rel)
+        return
+
+    # Every delegate needs a row. A role the table forgets has no defined
+    # slice at all -- not a narrow one, an undefined one -- and a misspelled
+    # role name produces exactly that while looking complete.
+    delegates = set(ROLES) - {"task-orchestrator"}
+    for role in sorted(delegates - set(rows)):
+        fail("%s: packet slicing table has no row for %s, so nothing says "
+             "what reaches it" % (rel, role))
+    for role in sorted(set(rows) - delegates):
+        fail("%s: packet slicing table has a row for %r, which is not a "
+             "delegate role" % (rel, role))
+
+    if not os.path.isdir(os.path.join(base, "knowledge")):
+        return  # check_knowledge reports the missing tree; every id would
+                # "resolve to nothing" here and bury it under fourteen lines.
+
+    manifest, _ = build_manifest(base)
+    known = set()
+    guarded = set()
+    for doc in manifest["documents"]:
+        ref = (doc["category"], doc["id"])
+        known.add(ref)
+        # Skills and templates are not run context, so they are never sliced.
+        if doc["category"] in ("rule", "memory") and doc["precedence"] >= 80:
+            guarded.add(ref)
+
+    for role in sorted(rows):
+        if not rows[role]:
+            continue  # "the full selected set" -- nothing narrowed, nothing to check
+        for ref in sorted(rows[role] - known):
+            fail("%s: slicing table sends %s/%s to %s, but the manifest has "
+                 "no such document" % (rel, ref[0], ref[1], role))
+        for ref in sorted(guarded - rows[role]):
+            fail("%s: the %s slice omits %s/%s -- a security-band document "
+                 "reaches every delegate, never only some"
+                 % (rel, role, ref[0], ref[1]))
+
 
 def check_claude(root, cfg, rows):
     for stem, key in ROLES.items():
@@ -464,6 +917,7 @@ def check_claude(root, cfg, rows):
             if tools:
                 fail("agents/task-orchestrator.md: has a tools: allowlist; the "
                      "manager must keep the full toolset")
+            check_slicing("agents/task-orchestrator.md", text, spec_base(root))
         else:
             if not tools:
                 fail("agents/%s.md: delegate has no tools: allowlist" % stem)
@@ -483,6 +937,8 @@ def check_claude(root, cfg, rows):
                 if allowed is False and writes:
                     fail("agents/test-validator.md: allowTestWrites is false but "
                          "the allowlist grants Edit/Write: %s" % tools)
+
+            check_registry("agents/%s.md" % stem, stem, text, bool(writes))
 
         for block in MANDATORY_BLOCKS[stem]:
             if block not in text:
@@ -551,6 +1007,9 @@ def check_codex(root, cfg, rows):
     elif read(manager).startswith("---"):
         fail("agents/task-orchestrator.md: has frontmatter; the manager is the "
              "top-level session, never a registered subagent")
+    else:
+        check_slicing("agents/task-orchestrator.md", read(manager),
+                      spec_base(root))
     if os.path.isfile(os.path.join(root, "agents", "task-orchestrator.toml")):
         fail("agents/task-orchestrator.toml: must not exist (the manager is "
              "never a subagent)")
@@ -583,6 +1042,9 @@ def check_codex(root, cfg, rows):
         for block in MANDATORY_BLOCKS[stem]:
             if block not in instructions:
                 fail("agents/%s: lost its %r block" % (name, block))
+        # Codex grants writes through the sandbox, not a tool allowlist.
+        check_registry("agents/%s" % name, stem, instructions,
+                       values.get("sandbox_mode") == "workspace-write")
 
         # three-way effort agreement (Codex pins no model by default)
         role_cfg = cfg.get(ROLES[stem], {})
@@ -629,6 +1091,7 @@ def run_checks(root, is_codex):
     rows = readme_table(root)
     (check_codex if is_codex else check_claude)(root, cfg, rows)
     check_prompt_hashes(root, is_codex)
+    check_knowledge(os.path.join(root, "orchestrator-spec"))
     check_tree(root)
     return list(FAILURES)
 
@@ -726,7 +1189,17 @@ def check_tree(root):
 
 # ---------------------------------------------------------------- main ----
 
-MODES = ("--bless", "--migrate", "--sync-start", "--sync-finish")
+MODES = ("--bless", "--migrate", "--sync-start", "--sync-finish",
+         "--index-knowledge", "--check-knowledge")
+
+
+def spec_base(path):
+    """The directory holding knowledge/, from either an install root or the
+    spec directory itself. The knowledge modes are the only ones that have to
+    run against templates/orchestrator-spec/, which has no agents/ beside it."""
+    if os.path.isdir(os.path.join(path, "knowledge")):
+        return path
+    return os.path.join(path, "orchestrator-spec")
 
 
 def main(argv):
@@ -748,6 +1221,28 @@ def main(argv):
         print(__doc__.strip())
         return 2
     root = os.path.abspath(args[0])
+
+    if "--index-knowledge" in flags:
+        base = spec_base(root)
+        if not os.path.isdir(os.path.join(base, "knowledge")):
+            print("FAIL: %s has no knowledge/ directory" % base)
+            return 2
+        out, count, problems = write_manifest(base)
+        for msg in problems:
+            print("WARN: " + msg)
+        print("Indexed %d knowledge documents -> %s" % (count, out))
+        return 1 if problems else 0
+
+    if "--check-knowledge" in flags:
+        base = spec_base(root)
+        check_knowledge(base)
+        if FAILURES:
+            for msg in FAILURES:
+                print("FAIL: " + msg)
+            return 1
+        print("OK: knowledge tree and manifest agree (%s)" % base)
+        return 0
+
     if not os.path.isdir(os.path.join(root, "agents")):
         print("FAIL: %s has no agents/ directory -- not an install root" % root)
         return 2
@@ -775,6 +1270,7 @@ def main(argv):
     rows = readme_table(root)
     (check_codex if is_codex else check_claude)(root, cfg, rows)
     check_prompt_hashes(root, is_codex)
+    check_knowledge(os.path.join(root, "orchestrator-spec"))
     check_tree(root)
 
     if FAILURES:

@@ -245,6 +245,33 @@ def build_fields(is_codex):
         out.append(field("workflow.agentTimeoutSeconds." + key, cat, label,
                          sub + " Seconds.", "int"))
 
+    cat = "Knowledge"
+    out.append(field("knowledge.enabled", cat, "Use the knowledge layer",
+                     "On. The manager selects from "
+                     "orchestrator-spec/knowledge/ and carries what it picked "
+                     "in each delegate's packet. Off means agents work from "
+                     "their prompts alone, as they did before this existed.",
+                     "toggle"))
+    out.append(field("knowledge.maximumDocuments", cat, "Document budget",
+                     "How many knowledge documents may reach one run. A budget, "
+                     "not a target -- ranking decides which ones, this decides "
+                     "where it stops.", "int", min=1, max=50))
+    out.append(field("knowledge.maximumCharacters", cat, "Character budget",
+                     "The other half of the budget, and usually the one that "
+                     "binds first. Characters of knowledge text per run.",
+                     "int", min=2000, max=200000))
+    out.append(field("knowledge.rankingPolicy", cat, "Ranking policy",
+                     "Which documents win when the budget cannot take them "
+                     "all. applicability-precedence keeps security first, then "
+                     "prefers documents that matched this repository over ones "
+                     "that apply everywhere.", "enum",
+                     options=["applicability-precedence"]))
+    out.append(field("knowledge.allowProposals", cat, "Allow learning proposals",
+                     "Off. When on, an agent may write a proposed rule or "
+                     "convention to .orchestrate/proposals/ in the repository. "
+                     "Proposals are never merged automatically -- a human "
+                     "does that, always.", "toggle"))
+
     cat = "Memory"
     out.append(field("memory.allowRepositoryMemoryLookup", cat,
                      "Repository memory lookup",
@@ -370,6 +397,16 @@ PROFILE_TIMEOUT_SCALE = {"swift": 0.6, "balanced": 1.0,
 BASE_TIMEOUTS = {"codebaseResearcher": 180, "implementationWorker": 900,
                  "testValidator": 300, "resultJudge": 180,
                  "correctionWorker": 300}
+# How much knowledge a run may carry. Budget only: knowledge.enabled,
+# rankingPolicy and allowProposals are NOT here. A profile changes how thorough
+# a run is; it never turns the layer off behind your back, and it never grants
+# the write that allowProposals is.
+PROFILE_KNOWLEDGE = {
+    "swift": {"maximumDocuments": 4, "maximumCharacters": 8000},
+    "balanced": {"maximumDocuments": 12, "maximumCharacters": 24000},
+    "thorough": {"maximumDocuments": 20, "maximumCharacters": 40000},
+    "exhaustive": {"maximumDocuments": 30, "maximumCharacters": 60000},
+}
 
 
 def profile_values(profile, is_codex):
@@ -385,6 +422,8 @@ def profile_values(profile, is_codex):
     scale = PROFILE_TIMEOUT_SCALE[profile]
     for key, base in BASE_TIMEOUTS.items():
         out["workflow.agentTimeoutSeconds.%s" % key] = int(round(base * scale))
+    for key, value in PROFILE_KNOWLEDGE[profile].items():
+        out["knowledge.%s" % key] = value
     return out
 
 

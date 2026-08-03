@@ -15,7 +15,9 @@ delegate.
 1. Take the task text passed as arguments. If empty, ask the user what to
    orchestrate.
 2. Read `{{CODEX_DIR}}/agents/task-orchestrator.md` and follow its ENTIRE
-   body (instruction hierarchy, dynamic discovery, review rules,
+   body (instruction hierarchy, dynamic discovery, repository
+   profile, knowledge assembly, declared capabilities, skill invocation,
+   review rules,
    procedure, hard limits) as your own operating protocol for this task --
    you are the manager. Read `{{CODEX_DIR}}/orchestration.json` as it
    directs, including the default-off flags for test writes and

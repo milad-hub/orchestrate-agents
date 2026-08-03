@@ -58,6 +58,12 @@ ts = d["workflow"]["agentTimeoutSeconds"]
 assert ts["codebaseResearcher"] == 180 and ts["implementationWorker"] == 900
 assert ts["testValidator"] == 300 and ts["resultJudge"] == 180 and ts["correctionWorker"] == 300
 assert d["workflow"]["judgePolicy"] == "auto", "judge policy should ship as auto"
+assert d["schemaVersion"] == 4, "should ship at schemaVersion 4"
+kn = d["knowledge"]
+assert kn["enabled"] is True, "knowledge layer should ship on"
+assert kn["allowProposals"] is False, "proposals should ship off"
+assert kn["rankingPolicy"] == "applicability-precedence"
+assert kn["maximumDocuments"] == 12 and kn["maximumCharacters"] == 24000
 assert d["workflow"]["validationPolicy"] == "auto"
 assert d["workflow"]["researchPolicy"] == "auto"
 # The booleans these replaced must not ship alongside them: two answers to one
@@ -108,11 +114,72 @@ check_worker_model() {
   fi
 }
 
+# The knowledge tree ships with the spec and is read through its manifest, so
+# an install where the two disagree has knowledge on disk that no agent can
+# select. verify-install.py already fails that; what only a fresh install can
+# assert is that the tree arrived at all and that the excluded examples stayed
+# out of the manifest.
+check_knowledge() {
+  local dir="$1" label="$2"
+  local kn="$dir/orchestrator-spec/knowledge"
+  if [ ! -f "$kn/index.json" ]; then
+    fail "$label: knowledge manifest missing"
+    return
+  fi
+  "$PY" - "$kn" <<'PYEOF' 2>/tmp/smoke_knowledge_err
+import json, os, sys
+kn = sys.argv[1]
+docs = json.load(open(os.path.join(kn, "index.json"), encoding="utf-8"))["documents"]
+by_cat = {}
+for d in docs:
+    by_cat.setdefault(d["category"], []).append(d["id"])
+assert len(by_cat.get("memory", [])) == 8, "expected 8 memory documents"
+assert len(by_cat.get("rule", [])) == 5, "expected 5 installed rules"
+assert len(by_cat.get("template", [])) == 6, "expected 6 templates"
+assert len(by_cat.get("provider", [])) == 4, "expected 4 provider descriptors"
+assert len(by_cat.get("skill", [])) == 9, "expected 9 skills"
+# rules/examples/ is illustration, not installed knowledge.
+assert "typescript" not in by_cat.get("rule", []), "examples leaked into the manifest"
+for d in docs:
+    path = os.path.join(kn, d["path"])
+    assert os.path.isfile(path), "manifest names a missing file: " + d["path"]
+    assert d["applies"], d["path"] + " has empty applicability"
+    assert 0 <= d["precedence"] <= 100, d["path"] + " precedence out of band"
+PYEOF
+  if [ $? -eq 0 ]; then
+    pass "$label: knowledge tree installed and manifest agrees"
+  else
+    fail "$label: knowledge: $(cat /tmp/smoke_knowledge_err)"
+  fi
+}
+
+# The learning loop is the one place an agent may author knowledge, so it is
+# the one place a bad rule could install itself. Asserted from the shipped
+# files, not from the prose describing them.
+check_proposal_gate() {
+  local dir="$1" label="$2"
+  if "$PY" "$REPO_ROOT/tests/proposal-gate-test.py" "$dir"        >/tmp/smoke_proposal_out 2>&1; then
+    pass "$label: proposals stay proposals"
+  else
+    fail "$label: proposal gate: $(cat /tmp/smoke_proposal_out)"
+  fi
+}
+
 check_drift() {
   if "$PY" "$REPO_ROOT/tests/check-drift.py" >/tmp/smoke_drift_out 2>&1; then
     pass "templates: structure and step references valid"
   else
     fail "templates: Claude/Codex drift: $(cat /tmp/smoke_drift_out)"
+  fi
+}
+
+# A green drift run only proves the checker did not complain. This proves it
+# would -- it breaks one invariant at a time and asserts the rejection.
+check_drift_negative() {
+  if "$PY" "$REPO_ROOT/tests/check-drift-negative.py"        >/tmp/smoke_driftneg_out 2>&1; then
+    pass "templates: drift checker rejects every broken invariant"
+  else
+    fail "templates: drift negative cases: $(cat /tmp/smoke_driftneg_out)"
   fi
 }
 
@@ -127,6 +194,7 @@ run_install() {
 
 echo "=== 0/12: template drift (Claude vs Codex) ==="
 check_drift
+check_drift_negative
 
 echo "=== 1/12: claude-only ==="
 PROJ="$SCRATCH/claude-only"
@@ -137,6 +205,8 @@ if run_install claude "$PROJ" ORCH_ALLOW_TEST_WRITES=n; then
   check_verify "$PROJ/.claude" "claude-only"
   check_verify_negative "$PROJ/.claude" "claude-only"
   check_worker_model "$PROJ/.claude/agents/implementation-worker.md" "claude-only"
+  check_knowledge "$PROJ/.claude" "claude-only"
+  check_proposal_gate "$PROJ/.claude" "claude-only"
 else
   fail "claude-only: install.sh failed: $(cat /tmp/smoke_install_out)"
 fi
@@ -150,6 +220,8 @@ if ORCH_CODEX_CONFIG_PATH_OVERRIDE="$PROJ/.codex/config.toml" run_install codex 
   check_json "$PROJ/.codex/orchestration.json" "codex-only"
   check_verify "$PROJ/.codex" "codex-only"
   check_verify_negative "$PROJ/.codex" "codex-only"
+  check_knowledge "$PROJ/.codex" "codex-only"
+  check_proposal_gate "$PROJ/.codex" "codex-only"
 else
   fail "codex-only: install.sh failed: $(cat /tmp/smoke_install_out)"
 fi

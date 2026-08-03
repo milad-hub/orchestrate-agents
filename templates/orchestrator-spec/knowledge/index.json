@@ -1,0 +1,326 @@
+{
+  "documents": [
+    {
+      "applies": [
+        "*"
+      ],
+      "category": "memory",
+      "id": "architecture",
+      "path": "memory/architecture.md",
+      "precedence": 30,
+      "title": "How the bundle is structured and why"
+    },
+    {
+      "applies": [
+        "*"
+      ],
+      "category": "memory",
+      "id": "business-rules",
+      "path": "memory/business-rules.md",
+      "precedence": 60,
+      "title": "Business rules of the repository under work"
+    },
+    {
+      "applies": [
+        "*"
+      ],
+      "category": "memory",
+      "id": "conventions",
+      "path": "memory/conventions.md",
+      "precedence": 40,
+      "title": "How work is done in this bundle"
+    },
+    {
+      "applies": [
+        "*"
+      ],
+      "category": "memory",
+      "id": "decisions",
+      "path": "memory/decisions.md",
+      "precedence": 40,
+      "title": "Standing architectural decisions and what they rule out"
+    },
+    {
+      "applies": [
+        "*"
+      ],
+      "category": "memory",
+      "id": "domain",
+      "path": "memory/domain.md",
+      "precedence": 60,
+      "title": "Domain model and vocabulary of the repository under work"
+    },
+    {
+      "applies": [
+        "*"
+      ],
+      "category": "memory",
+      "id": "glossary",
+      "path": "memory/glossary.md",
+      "precedence": 20,
+      "title": "Terms used across the bundle, with their exact meaning here"
+    },
+    {
+      "applies": [
+        "*"
+      ],
+      "category": "memory",
+      "id": "integrations",
+      "path": "memory/integrations.md",
+      "precedence": 60,
+      "title": "External systems the repository under work depends on"
+    },
+    {
+      "applies": [
+        "*"
+      ],
+      "category": "memory",
+      "id": "project-overview",
+      "path": "memory/project-overview.md",
+      "precedence": 30,
+      "title": "What the orchestration bundle is and what it is for"
+    },
+    {
+      "applies": [
+        "*"
+      ],
+      "category": "provider",
+      "id": "adr",
+      "path": "providers/adr.md",
+      "precedence": 55,
+      "title": "Architecture decision records for the repository under work"
+    },
+    {
+      "applies": [
+        "*"
+      ],
+      "category": "provider",
+      "id": "git",
+      "path": "providers/git.md",
+      "precedence": 40,
+      "title": "Version control history of the repository under work"
+    },
+    {
+      "applies": [
+        "*"
+      ],
+      "category": "provider",
+      "id": "markdown",
+      "path": "providers/markdown.md",
+      "precedence": 50,
+      "title": "The knowledge tree itself"
+    },
+    {
+      "applies": [
+        "*"
+      ],
+      "category": "provider",
+      "id": "repository-intelligence",
+      "path": "providers/repository-intelligence.md",
+      "precedence": 45,
+      "title": "Derived profile of the repository under work"
+    },
+    {
+      "applies": [
+        "*"
+      ],
+      "category": "rule",
+      "id": "architecture",
+      "path": "rules/architecture.md",
+      "precedence": 45,
+      "title": "Architectural rules for changes to this bundle and to target repositories"
+    },
+    {
+      "applies": [
+        "*"
+      ],
+      "category": "rule",
+      "id": "coding",
+      "path": "rules/coding.md",
+      "precedence": 40,
+      "title": "Coding rules that hold in every repository"
+    },
+    {
+      "applies": [
+        "*"
+      ],
+      "category": "rule",
+      "id": "git",
+      "path": "rules/git.md",
+      "precedence": 50,
+      "title": "Version control rules"
+    },
+    {
+      "applies": [
+        "*"
+      ],
+      "category": "rule",
+      "id": "security",
+      "path": "rules/security.md",
+      "precedence": 90,
+      "title": "Security rules, never overridden by convenience"
+    },
+    {
+      "applies": [
+        "*"
+      ],
+      "category": "rule",
+      "id": "testing",
+      "path": "rules/testing.md",
+      "precedence": 40,
+      "title": "Testing and validation rules"
+    },
+    {
+      "applies": [
+        "*"
+      ],
+      "category": "skill",
+      "id": "bug-fixing",
+      "path": "skills/bug-fixing.md",
+      "precedence": 45,
+      "title": "Fix a defect at its cause"
+    },
+    {
+      "applies": [
+        "*"
+      ],
+      "category": "skill",
+      "id": "code-review",
+      "path": "skills/code-review.md",
+      "precedence": 45,
+      "title": "Review a change against evidence"
+    },
+    {
+      "applies": [
+        "*"
+      ],
+      "category": "skill",
+      "id": "debugging",
+      "path": "skills/debugging.md",
+      "precedence": 45,
+      "title": "Find the cause of a failure"
+    },
+    {
+      "applies": [
+        "*"
+      ],
+      "category": "skill",
+      "id": "documentation",
+      "path": "skills/documentation.md",
+      "precedence": 35,
+      "title": "Write or update documentation that stays true"
+    },
+    {
+      "applies": [
+        "*"
+      ],
+      "category": "skill",
+      "id": "feature-development",
+      "path": "skills/feature-development.md",
+      "precedence": 40,
+      "title": "Add behavior that does not exist yet"
+    },
+    {
+      "applies": [
+        "*"
+      ],
+      "category": "skill",
+      "id": "performance",
+      "path": "skills/performance.md",
+      "precedence": 40,
+      "title": "Make something measurably faster"
+    },
+    {
+      "applies": [
+        "*"
+      ],
+      "category": "skill",
+      "id": "refactoring",
+      "path": "skills/refactoring.md",
+      "precedence": 40,
+      "title": "Change structure without changing behavior"
+    },
+    {
+      "applies": [
+        "*"
+      ],
+      "category": "skill",
+      "id": "security",
+      "path": "skills/security.md",
+      "precedence": 85,
+      "title": "Review a change for security consequences"
+    },
+    {
+      "applies": [
+        "*"
+      ],
+      "category": "skill",
+      "id": "testing",
+      "path": "skills/testing.md",
+      "precedence": 45,
+      "title": "Validate a change against the project's own suite"
+    },
+    {
+      "applies": [
+        "*"
+      ],
+      "category": "template",
+      "id": "adr",
+      "path": "templates/adr.md",
+      "precedence": 30,
+      "title": "Architecture decision record skeleton"
+    },
+    {
+      "applies": [
+        "*"
+      ],
+      "category": "template",
+      "id": "bug",
+      "path": "templates/bug.md",
+      "precedence": 30,
+      "title": "Bug report skeleton"
+    },
+    {
+      "applies": [
+        "*"
+      ],
+      "category": "template",
+      "id": "design",
+      "path": "templates/design.md",
+      "precedence": 30,
+      "title": "Design document skeleton"
+    },
+    {
+      "applies": [
+        "*"
+      ],
+      "category": "template",
+      "id": "feature",
+      "path": "templates/feature.md",
+      "precedence": 30,
+      "title": "Feature description skeleton"
+    },
+    {
+      "applies": [
+        "*"
+      ],
+      "category": "template",
+      "id": "proposal",
+      "path": "templates/proposal.md",
+      "precedence": 30,
+      "title": "Learning-loop proposal skeleton"
+    },
+    {
+      "applies": [
+        "*"
+      ],
+      "category": "template",
+      "id": "skill",
+      "path": "templates/skill.md",
+      "precedence": 30,
+      "title": "Skill descriptor skeleton"
+    }
+  ],
+  "note": "Generated. Do not hand-edit; see verify-install.py --index-knowledge",
+  "schemaVersion": 1
+}
