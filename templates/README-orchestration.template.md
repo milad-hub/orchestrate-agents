@@ -66,6 +66,136 @@ install's invariants — including that the allowlist above matches
 re-checking them by eye, and you can run it yourself at any time:
 `python3 {{CLAUDE_DIR}}/orchestrator-spec/verify-install.py {{CLAUDE_DIR}}`
 
+### Skills and the agent registry
+
+`knowledge/skills/` holds nine named procedures — feature-development,
+bug-fixing, debugging, code-review, testing, refactoring, documentation,
+performance, security. Each carries purpose, prerequisites, required context,
+execution steps, expected outputs, a validation checklist, a quality checklist
+and completion criteria. The manager selects one by name, resolves the context
+it declares it needs, and carries its validation checklist and completion
+criteria into the packet verbatim; the delegate reports against them, so
+finishing is a check rather than an opinion.
+
+`debugging` and `bug-fixing` are separate on purpose: one ends at an identified
+cause, the other starts there. Conflating them loses the reviewable boundary
+between finding and changing.
+
+Each role also declares what it is for — responsibilities, workflows, skills,
+rules, providers, writes, inputs, outputs — in its own prompt. The manager
+checks that declaration before every dispatch: the packet's scope must fall
+inside it, the role's allowlist must carry the tools the work needs, and
+nothing may ask for a write the role cannot make. `verify-install.py` fails an
+install where a declaration and the harness disagree — a role claiming it
+writes nothing while the harness would let it is a guarantee nobody is holding,
+and the claim is what dispatch trusts.
+
+Adding a skill is dropping a descriptor into `knowledge/skills/` and
+regenerating the manifest. No core file changes.
+
+### Decisions and the learning loop
+
+Each run loads the repository's own architecture decision records — from
+`docs/adr/`, `doc/adr/`, `adr/` or `architecture/decisions/` — so a change
+cannot silently contradict a settled decision. A superseded record is carried
+with that status rather than dropped: knowing a decision was reversed, and by
+what, is the part a later run needs. A repository with no such directory is
+reported as having none, not given an invented location.
+
+A run may also **propose** knowledge — a rule, a convention, a skill, an
+architecture improvement. Three things hold that shut, and a test asserts all
+three from the shipped files rather than from this paragraph:
+
+- `knowledge.allowProposals` ships **off**. While it is off nothing is written
+  at all; a run may mention a suggestion in its report and no more.
+- With it on, proposals go to `.orchestrate/proposals/` in the repository —
+  never into the knowledge tree and never into the repository's ADR directory.
+- Nothing merges one. A human does, always. A record nobody approved is a
+  suggestion wearing the format of a decision, and the format is what makes
+  the next run treat it as settled.
+
+Each proposal states what it would add verbatim, the one occurrence that
+motivated it, its evidence, its scope, what it conflicts with, and the cost if
+it is wrong. Without evidence there is no proposal — see
+`knowledge/templates/proposal.md`.
+
+### Repository profile
+
+Each run derives a picture of the repository it is working in — languages,
+frameworks, packages, modules, layers, folder structure, package-level
+dependency graph, build tools, CI, test frameworks, lint rules and observed
+conventions — from what the repository already states about itself. It decides
+task classification, command routing, and which technology-scoped knowledge
+documents apply.
+
+It is cached at `.orchestrate/project-profile.json` in the repository and
+**revalidated before it is trusted**: same head commit, no manifest, lockfile,
+CI or analyzer configuration changed since it was derived, same bundle version.
+Anything else and it is re-derived. A derived fact is accurate when fresh and
+misleading when stale, and this one looks exactly like evidence.
+
+Writing it is a repository mutation: with repository writes not permitted, or
+the path not writable, the profile is held in memory and the run continues.
+`.orchestrate/` is derived state about one machine's view of the repository —
+the manager mentions it once rather than editing your `.gitignore`.
+
+A field that cannot be determined is recorded as unknown, never guessed. That
+matters for knowledge selection: an unknown field never matches an
+applicability token, so a run with no profile selects only the documents that
+apply everywhere rather than the wrong technology's rules.
+
+### Knowledge layer
+
+`orchestrator-spec/knowledge/` holds the memory, rules, templates and
+provider descriptors every run draws on, indexed by `knowledge/index.json`.
+The manager resolves knowledge once per run through that manifest and carries
+what it selected in each delegate's task packet; delegates never read the tree
+themselves, and nothing walks it.
+
+| Setting | Ships as | What it does |
+|---|---|---|
+| `knowledge.enabled` | `true` | Off means agents work from their prompts alone |
+| `knowledge.maximumDocuments` | `12` | How many documents may reach one run |
+| `knowledge.maximumCharacters` | `24000` | The other half of the budget. The shipped documents total well under it |
+| `knowledge.rankingPolicy` | `applicability-precedence` | Which documents win when the budget cannot take them all |
+| `knowledge.allowProposals` | `false` | Whether an agent may write a proposed rule to `.orchestrate/proposals/`. Proposals are never merged automatically |
+
+A document applies to every repository (`applies: *`) or to named
+technologies (`applies: angular, typescript`), matched case-insensitively
+against the repository profile. A token that matches nothing excludes its
+document rather than including it everywhere, so a typo is a missing rule and
+not a wrong one.
+
+Only rules and project memory are candidates: a skill is fetched by name when
+one is invoked, a template only when a run authors what it templates, and
+provider descriptors document the tree for whoever maintains it. Those three
+are over half the tree by size, so excluding them is what keeps a run's context
+bounded — the budget is the backstop, not the mechanism.
+
+Ranking puts security and safety documents first and never truncates them
+away, then prefers a document whose applicability tokens matched this
+repository over one that applies everywhere, then higher precedence, then rules
+before memory, then id — so two runs on one repository select the same documents in
+the same order. The policy is named in configuration so it can be replaced; a
+replacement may reorder the applicable set but may not widen it, skip the
+budget, or move a security document out of the front.
+
+Documents ship with five frontmatter fields (`id`, `category`, `title`,
+`applies`, `precedence`) and `verify-install.py` fails an install where one is
+malformed or where the manifest no longer matches the tree — a document added
+without regenerating would sit on disk unselectable, looking installed. After
+editing the tree:
+
+```
+python3 {{CLAUDE_DIR}}/orchestrator-spec/verify-install.py --index-knowledge {{CLAUDE_DIR}}/orchestrator-spec
+```
+
+The per-repository documents (`memory/business-rules.md`, `domain.md`,
+`integrations.md`) ship empty on purpose, and are skipped while unfilled —
+until you write one it is guidance for you, not context for a run: this bundle is installed once for
+every repository on the machine, so asserting a domain there would be
+asserting one that is not present.
+
 ## 4. Launch
 
 - `claude --agent task-orchestrator` — manager as main session agent.

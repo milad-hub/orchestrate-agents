@@ -139,8 +139,8 @@ python3 ~/.claude/orchestrator-spec/config-ui.py
 A local page on `127.0.0.1` with one tab per installed platform — both tabs
 from either copy, since `.claude` and `.codex` sit next to each other. Settings
 are grouped (models and effort, permissions and writes, workflow and review,
-timeouts, memory, capabilities), each with a description and a toggle, number,
-dropdown or list box.
+timeouts, knowledge, memory, capabilities), each with a description and a
+toggle, number, dropdown or list box.
 
 At the top of each tab is one dial from **Swift** to **Exhaustive**:
 
@@ -152,6 +152,7 @@ At the top of each tab is one dial from **Swift** to **Exhaustive**:
 | Parallel workers | 1 | 4 | 4 | 6 |
 | Correction cycles | 0 | 2 | 3 | 5 |
 | Deadlines | ×0.6 | ×1 | ×1.5 | ×2 |
+| Knowledge budget | 4 docs | 12 | 20 | 30 |
 
 Plus a model and effort per role (effort only on Codex). Picking a stop applies
 every one of those settings at once, re-runs the verifier, and **puts them all
@@ -185,7 +186,9 @@ Three things worth knowing:
 - **A profile can never widen a permission.** Profiles write an explicit list
   of keys; `permissions`, `capabilities`, `memory` and the
   test-write/build/serve flags are not on it, and a test asserts those bytes
-  are unchanged after applying all four.
+  are unchanged after applying all four. Of the knowledge settings a profile
+  writes only the budget — never `knowledge.enabled`, the ranking policy, or
+  `allowProposals`, which is a write rather than a dial.
 - **The active profile is derived, not stored.** Change one setting afterwards
   and the dial reads **Custom** — a stored label would go stale and lie.
 - **No profile ever asks you to re-sync.** Profiles write models, effort,
@@ -246,13 +249,17 @@ python3 ~/.claude/orchestrator-spec/verify-install.py --migrate ~/.claude
 ```
 
 `/orchestrate-sync` runs it, and the config UI offers it when it sees an old
-file. It is a no-op when the schema already matches. Both older schemas
-migrate: **2 → 3** added `workflow.researchPolicy`, `judgePolicy` and
-`validationPolicy` (`never` / `auto` / `always`), derived from the booleans
-they replace; **1 → 3** additionally drops two descriptive blocks nothing
-reads any more and backfills the bounded-execution keys (`agentTimeoutSeconds`,
-`waitSliceSeconds`, `maximumAgentRetries`). Either way a migrated install
-behaves exactly as before until you pick a profile.
+file. It is a no-op when the schema already matches. Every older schema
+migrates to the current one: **3 → 4** backfills the `knowledge` block with
+the shipped defaults, and with `allowProposals` off — a migration never hands
+an existing install a new write; **2 → 4** additionally adds
+`workflow.researchPolicy`, `judgePolicy` and `validationPolicy` (`never` /
+`auto` / `always`), derived from the booleans they replace; **1 → 4** on top of
+that drops two descriptive blocks nothing reads any more and backfills the
+bounded-execution keys (`agentTimeoutSeconds`, `waitSliceSeconds`,
+`maximumAgentRetries`). Any of them leaves an install behaving exactly as
+before until you pick a profile. A key you had already tuned is never
+overwritten.
 
 ### Uninstalling
 
@@ -352,16 +359,21 @@ directory/directories you installed it into.
 ## Repo layout
 
 ```
+docs/                      — how the bundle is built and how to extend it
 install.sh / install.ps1   — installers, and --uninstall / -Uninstall
 bootstrap.sh / .ps1        — no-clone entry points: fetch the branch
                               archive to a temp dir, run the installer
                               from it, delete it again
-tests/                     — smoke suites (bash + PowerShell) and the
-                              config-UI test; they install into a
-                              throwaway directory and verify the result
+tests/                     — smoke suites (bash + PowerShell), the
+                              config-UI test and the proposal-gate test;
+                              they install into a throwaway directory and
+                              verify the result
 templates/
   orchestrator-spec/       — shared spec source (edit + regenerate),
                               platform-neutral, used by both generators
+    knowledge/             — the knowledge layer: memory, rules, skills,
+                              templates and provider descriptors, read
+                              through the generated index.json manifest
     verify-install.py      — the install's invariants, as code
     config-ui.py           — the browser settings UI
   agents/                  — the 5 Claude Code agent definitions
@@ -389,9 +401,24 @@ sync with your installation as it changes.
 
 Bug reports and pull requests: https://github.com/milad-hub/orchestrate-agents/issues.
 
+[docs/](docs/) explains the architecture, the knowledge layer, the
+extension points and the test harness — start with
+[docs/extending.md](docs/extending.md), which has a recipe per kind of
+change and a conformance checklist for adding a third platform.
+
 A change to shared behavior belongs in `templates/orchestrator-spec/`
 first, then in both platform templates — `generation-plan.md` explains
-how the two are reconciled. Run both smoke suites before opening a PR:
+how the two are reconciled.
+
+Adding or removing a knowledge document means regenerating its manifest in
+the same change, or the verifier fails the install:
+
+```bash
+python3 templates/orchestrator-spec/verify-install.py \
+  --index-knowledge templates/orchestrator-spec
+```
+
+Run both smoke suites before opening a PR:
 
 ```bash
 bash tests/smoke-test.sh

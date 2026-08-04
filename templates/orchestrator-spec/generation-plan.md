@@ -27,6 +27,15 @@ platform templates.
    `skill/orchestrate-sync.spec.md` (on Codex, plus its `references/`
    body file).
 5. `{{AGENT_HOME_DIR}}/README-orchestration.md` — user documentation.
+6. `{{AGENT_HOME_DIR}}/orchestrator-spec/knowledge/` — the knowledge layer,
+   copied verbatim with the rest of the spec. Nothing in it is
+   platform-specific and nothing in it is substituted, so both generators
+   ship the same tree. Its manifest (`knowledge/index.json`) is generated
+   from the tree, not written by hand: after adding or removing a document,
+   run `verify-install.py --index-knowledge templates/orchestrator-spec` and
+   commit the result. The standard verifier run fails a manifest that no
+   longer matches, so a forgotten regeneration is caught at install time
+   rather than by an agent finding nothing.
 
 ## Mandatory rules to embed
 
@@ -54,6 +63,9 @@ platform templates.
 - No `permissionMode: bypassPermissions` anywhere.
 - Skill does not duplicate the manager prompt; it delegates.
 - No credentials in any generated file.
+- Every knowledge document parses, carries exactly the five schema fields,
+  and is listed in `knowledge/index.json` unless it sits under an
+  excluded directory (`rules/examples/`).
 - Orchestrator is not made the default agent (no settings.json change).
 
 ## Version-support notes

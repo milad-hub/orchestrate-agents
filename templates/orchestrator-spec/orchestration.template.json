@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 3,
+  "schemaVersion": 4,
   "orchestrator": {
     "model": "opus",
     "desiredEffort": "high"
@@ -53,6 +53,13 @@
     "allowDestructiveGit": false,
     "allowExternalMutations": false,
     "requireApprovalForExternalMutations": true
+  },
+  "knowledge": {
+    "enabled": true,
+    "maximumDocuments": 12,
+    "maximumCharacters": 24000,
+    "rankingPolicy": "applicability-precedence",
+    "allowProposals": false
   },
   "memory": {
     "persistentAgentMemory": false,

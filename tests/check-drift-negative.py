@@ -18,6 +18,7 @@ REPORTING = ROOT / "templates/orchestrator-spec/policies/reporting.md"
 CODEX_UPDATE_SKILL = ROOT / ("templates/codex/skills/orchestrate-sync/"
                              "references/orchestrate-sync-body.md")
 CODEX_RUN_SKILL = ROOT / "templates/codex/skills/orchestrate/SKILL.md"
+DOC_RULES = ROOT / "docs/rules.md"
 
 
 def drift():
@@ -77,6 +78,18 @@ results = [
          CODEX_RUN_SKILL,
          lambda t: t.replace("## Notes", "## Caveats", 1),
          "orchestrate heading"),
+    # docs/ explains the spec instead of restating it, so a page pointing at a
+    # file that moved has silently stopped describing anything -- and nothing
+    # else fails when documentation goes stale.
+    case("a docs page citing a spec file that no longer exists is rejected",
+         DOC_RULES,
+         lambda t: t.replace("orchestrator-spec/knowledge/rules/",
+                             "orchestrator-spec/knowledge/renamed/", 1),
+         "links to missing"),
+    case("a docs page that cites nothing outside docs/ is rejected",
+         DOC_RULES,
+         lambda t: "# Rules\n\nSee [skills](skills.md).\n",
+         "cites no file outside docs/"),
 ]
 
 code, out = drift()

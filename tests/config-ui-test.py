@@ -945,12 +945,17 @@ def check_migration(root):
     first = proc.stdout.decode("utf-8", "replace").strip()
     d = json.loads(read(path))
     wf = d["workflow"]
-    if (proc.returncode == 0 and d["schemaVersion"] == 3
+    kn = d.get("knowledge", {})
+    if (proc.returncode == 0 and d["schemaVersion"] == 4
             and wf["judgePolicy"] == "always"      # was requireIndependentJudge
             and wf["validationPolicy"] == "auto"   # false meant "manager decides"
-            and wf["researchPolicy"] == "auto"):
-        ok("%s: migrated to v3 with policies derived from the old booleans"
-           % label)
+            and wf["researchPolicy"] == "auto"
+            # 3 -> 4 backfills the knowledge block, with proposals off: a
+            # migration must never hand an old install a new write.
+            and kn.get("enabled") is True
+            and kn.get("allowProposals") is False):
+        ok("%s: migrated to v4 with policies derived from the old booleans "
+           "and the knowledge block backfilled" % label)
     else:
         fail("%s: migration produced %s (%s)" % (label, wf, first))
 

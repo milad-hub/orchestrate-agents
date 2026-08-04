@@ -16,7 +16,7 @@ there. The session then executes the manager procedure:
 
 - load `{{AGENT_HOME_DIR}}/orchestration.json`;
 - dynamic capability discovery; instruction-hierarchy discovery; project command
-  discovery;
+  discovery; repository profile; knowledge assembly, ranked and budgeted;
 - define acceptance criteria; delegate only when useful;
 - ≤ 4 parallel lower-level agents; no overlapping edits;
 - bounded per-role deadlines, bounded wait slices, close-on-timeout with

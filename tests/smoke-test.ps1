@@ -53,6 +53,12 @@ function Test-Json {
         if ($d.workflow.agentTimeoutSeconds.resultJudge -ne 180) { throw "judge timeout != 180" }
         if ($d.workflow.agentTimeoutSeconds.correctionWorker -ne 300) { throw "correction timeout != 300" }
         if ($d.workflow.judgePolicy -ne "auto") { throw "judgePolicy should ship as auto" }
+        if ($d.schemaVersion -ne 4) { throw "should ship at schemaVersion 4" }
+        if ($d.knowledge.enabled -ne $true) { throw "knowledge layer should ship on" }
+        if ($d.knowledge.allowProposals -ne $false) { throw "proposals should ship off" }
+        if ($d.knowledge.rankingPolicy -ne "applicability-precedence") { throw "unexpected ranking policy" }
+        if ($d.knowledge.maximumDocuments -ne 12) { throw "document budget != 12" }
+        if ($d.knowledge.maximumCharacters -ne 24000) { throw "character budget != 24000" }
         if ($d.workflow.validationPolicy -ne "auto") { throw "validationPolicy should ship as auto" }
         if ($d.workflow.researchPolicy -ne "auto") { throw "researchPolicy should ship as auto" }
         foreach ($gone in @("requireIndependentJudge", "requireValidation")) {
@@ -107,6 +113,55 @@ function Test-WorkerModel {
     }
 }
 
+# The knowledge tree ships with the spec and is read through its manifest, so
+# an install where the two disagree has knowledge on disk that no agent can
+# select. verify-install.py already fails that; what only a fresh install can
+# assert is that the tree arrived and that the excluded examples stayed out.
+function Test-Knowledge {
+    param([string]$Dir, [string]$Label)
+    $kn = Join-Path $Dir "orchestrator-spec\knowledge"
+    $manifest = Join-Path $kn "index.json"
+    if (-not (Test-Path $manifest)) { Test-Fail "$Label`: knowledge manifest missing"; return }
+    $docs = (Get-Content $manifest -Raw | ConvertFrom-Json).documents
+    $problems = @()
+    foreach ($pair in @(@("memory", 8), @("rule", 5), @("template", 6), @("provider", 4), @("skill", 9))) {
+        $count = @($docs | Where-Object { $_.category -eq $pair[0] }).Count
+        if ($count -ne $pair[1]) { $problems += "expected $($pair[1]) $($pair[0]) documents, found $count" }
+    }
+    if (-not @($docs | Where-Object { $_.category -eq "provider" }).Count) {
+        $problems += "no provider descriptors"
+    }
+    # rules/examples/ is illustration, not installed knowledge.
+    if (@($docs | Where-Object { $_.id -eq "typescript" }).Count) {
+        $problems += "examples leaked into the manifest"
+    }
+    foreach ($d in $docs) {
+        if (-not (Test-Path (Join-Path $kn $d.path))) { $problems += "manifest names a missing file: $($d.path)" }
+        if (-not $d.applies) { $problems += "$($d.path) has empty applicability" }
+        if ($d.precedence -lt 0 -or $d.precedence -gt 100) { $problems += "$($d.path) precedence out of band" }
+    }
+    if ($problems.Count -eq 0) {
+        Test-Pass "$Label`: knowledge tree installed and manifest agrees"
+    } else {
+        Test-Fail "$Label`: knowledge: $($problems -join '; ')"
+    }
+}
+
+# The learning loop is the one place an agent may author knowledge, so it is
+# the one place a bad rule could install itself. Asserted from the shipped
+# files, not from the prose describing them.
+function Test-ProposalGate {
+    param([string]$Dir, [string]$Label)
+    $py = Get-Python
+    if (-not $py) { Test-Fail "$Label`: no python on PATH -- proposal gate cannot run"; return }
+    $out = & $py (Join-Path $RepoRoot "tests\proposal-gate-test.py") $Dir
+    if ($LASTEXITCODE -eq 0) {
+        Test-Pass "$Label`: proposals stay proposals"
+    } else {
+        Test-Fail "$Label`: proposal gate: $out"
+    }
+}
+
 function Test-Drift {
     $py = Get-Python
     if (-not $py) { Test-Fail "drift check cannot run: no python on PATH"; return }
@@ -115,6 +170,19 @@ function Test-Drift {
         Test-Pass "templates: structure and step references valid"
     } else {
         Test-Fail "templates: Claude/Codex drift: $out"
+    }
+}
+
+# A green drift run only proves the checker did not complain. This proves it
+# would -- it breaks one invariant at a time and asserts the rejection.
+function Test-DriftNegative {
+    $py = Get-Python
+    if (-not $py) { Test-Fail "drift negative cases cannot run: no python on PATH"; return }
+    $out = & $py (Join-Path $RepoRoot "tests\check-drift-negative.py")
+    if ($LASTEXITCODE -eq 0) {
+        Test-Pass "templates: drift checker rejects every broken invariant"
+    } else {
+        Test-Fail "templates: drift negative cases: $out"
     }
 }
 
@@ -135,6 +203,7 @@ function Invoke-Install {
 
 Write-Host "=== 0/12: template drift (Claude vs Codex) ==="
 Test-Drift
+Test-DriftNegative
 
 Write-Host "=== 1/12: claude-only ==="
 $proj = Join-Path $Scratch "claude-only"
@@ -145,6 +214,8 @@ if ((Invoke-Install "claude" $proj) -eq 0) {
     Test-Verify (Join-Path $proj ".claude") "claude-only"
     Test-VerifyNegative (Join-Path $proj ".claude") "claude-only"
     Test-WorkerModel (Join-Path $proj ".claude\agents\implementation-worker.md") "claude-only"
+    Test-Knowledge (Join-Path $proj ".claude") "claude-only"
+    Test-ProposalGate (Join-Path $proj ".claude") "claude-only"
 } else {
     Test-Fail "claude-only: install.ps1 failed"
 }
@@ -159,6 +230,8 @@ if ((Invoke-Install "codex" $proj $cfg) -eq 0) {
     Test-Json (Join-Path $proj ".codex\orchestration.json") "codex-only"
     Test-Verify (Join-Path $proj ".codex") "codex-only"
     Test-VerifyNegative (Join-Path $proj ".codex") "codex-only"
+    Test-Knowledge (Join-Path $proj ".codex") "codex-only"
+    Test-ProposalGate (Join-Path $proj ".codex") "codex-only"
 } else {
     Test-Fail "codex-only: install.ps1 failed"
 }

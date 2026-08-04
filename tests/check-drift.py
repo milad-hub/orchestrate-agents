@@ -164,6 +164,32 @@ for needle, path, must_be_present in INVARIANTS:
         failures.append("%s: %r must be %s" % (
             path, needle, "present" if must_be_present else "absent"))
 
+# docs/ explains the spec rather than restating it, so every page names the
+# spec files that own its subject. A page pointing at a file that no longer
+# exists is documentation that has silently stopped describing anything --
+# which is the failure mode a doc tree has, since nothing else fails when it
+# goes stale.
+DOC_LINK = re.compile(r"\]\((\.\./[^)#]+)\)")
+docs_dir = ROOT / "docs"
+if not docs_dir.is_dir():
+    failures.append("docs/ is missing")
+else:
+    pages = sorted(docs_dir.glob("*.md"))
+    if len(pages) < 2:
+        failures.append("docs/ has no pages")
+    for page in pages:
+        rel = "docs/" + page.name
+        text = page.read_text(encoding="utf-8")
+        targets = DOC_LINK.findall(text)
+        for target in targets:
+            if not (docs_dir / target).resolve().exists():
+                failures.append("%s links to missing %s" % (rel, target))
+        # The index is a table of contents; every other page must anchor to
+        # something outside docs/, or it is prose with no source.
+        if page.name != "README.md" and not any(
+                not t.startswith("../docs/") for t in targets):
+            failures.append("%s cites no file outside docs/" % rel)
+
 for f in failures:
     print("DRIFT: " + f)
 sys.exit(1 if failures else 0)
